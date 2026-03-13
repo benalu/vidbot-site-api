@@ -1,0 +1,23 @@
+# environment - JANGAN PERNAH PUSH
+.env
+.env.local
+.env.production
+
+# binary tools
+tools/
+
+# test files
+test/
+
+# build output
+vidbot-site-api
+vidbot-site-api.exe
+
+# air (live reload) temp files
+tmp/
+
+# Go
+vendor/
+
+generate_masterkey.py
+ecnrypt_worker.py
