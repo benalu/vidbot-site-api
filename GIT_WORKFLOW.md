@@ -89,7 +89,7 @@ chmod +x .git/hooks/prepare-commit-msg
 go run cmd/seed/main.go
 
 # jalankan server
-go run main.go
+go run main.go or air
 ```
 
 ---

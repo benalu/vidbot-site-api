@@ -21,3 +21,6 @@ vendor/
 
 generate_masterkey.py
 ecnrypt_worker.py
+test.http
+prepare-commit-msg
+vidbot-api

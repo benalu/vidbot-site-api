@@ -1,4 +1,4 @@
-package instagram
+package twitter
 
 import (
 	"fmt"
@@ -14,18 +14,15 @@ type VideoResult struct {
 }
 
 type ExtractionResult struct {
-	ID        string
-	URL       string
 	Title     string
 	Thumbnail string
 	Duration  string
+	URL       string
 	Author    provider.Author
 	Videos    []VideoResult
 	AudioURL  string
 	AudioURL2 string
 	AudioExt  string
-	ViewCount int64
-	LikeCount int64
 }
 
 type Service struct {
@@ -37,7 +34,7 @@ func NewService(providers []provider.Provider) *Service {
 }
 
 func (s *Service) Extract(url string) (*ExtractionResult, error) {
-	ordered := provider.ResolveProviderForCategory(s.providers, "instagram")
+	ordered := provider.ResolveProviderForCategory(s.providers, "twitter")
 
 	if len(ordered) == 0 {
 		return nil, fmt.Errorf("no providers available")
@@ -82,20 +79,18 @@ func (s *Service) Extract(url string) (*ExtractionResult, error) {
 	var secondary *provider.MediaResult
 	select {
 	case secondary = <-secondaryCh:
-	case <-time.After(1 * time.Second):
+	case <-time.After(3 * time.Second):
 	}
 
 	return buildResult(primary, secondary), nil
 }
 
 func buildResult(primary, secondary *provider.MediaResult) *ExtractionResult {
-	// ambil URL pertama dari secondary — tidak perlu quality matching
-	var secondaryFirstURL string
+	secondaryVideoMap := map[string]string{}
 	var secondaryAudioURL string
-
 	if secondary != nil {
-		if len(secondary.Videos) > 0 {
-			secondaryFirstURL = secondary.Videos[0].URL
+		for _, v := range secondary.Videos {
+			secondaryVideoMap[v.Quality] = v.URL
 		}
 		if secondary.Audio != nil {
 			secondaryAudioURL = secondary.Audio.URL
@@ -103,28 +98,22 @@ func buildResult(primary, secondary *provider.MediaResult) *ExtractionResult {
 	}
 
 	videos := []VideoResult{}
-	for i, v := range primary.Videos {
-		url2 := ""
-		if i == 0 {
-			url2 = secondaryFirstURL
-		}
+	for _, v := range primary.Videos {
 		videos = append(videos, VideoResult{
 			Quality:   v.Quality,
 			URL:       v.URL,
-			URL2:      url2,
+			URL2:      secondaryVideoMap[v.Quality],
 			Extension: v.Extension,
 		})
 	}
 
 	res := &ExtractionResult{
-		URL:       primary.URL,
 		Title:     primary.Title,
 		Thumbnail: primary.Thumbnail,
 		Duration:  primary.Duration,
+		URL:       primary.URL,
 		Author:    primary.Author,
 		Videos:    videos,
-		ViewCount: primary.ViewCount,
-		LikeCount: primary.LikeCount,
 	}
 
 	if primary.Audio != nil {

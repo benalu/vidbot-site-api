@@ -8,7 +8,7 @@ type DownloadLinks struct {
 	Server2  string `json:"server_2,omitempty"`
 }
 
-// untuk vidhub
+// vidhub
 type VidhubData struct {
 	Filecode  string `json:"filecode"`
 	Title     string `json:"title"`
@@ -26,7 +26,7 @@ type VidhubResponse struct {
 	Download DownloadLinks        `json:"download"`
 }
 
-// untuk content
+// content
 type Author struct {
 	Name     string `json:"name"`
 	Username string `json:"username,omitempty"`
@@ -36,7 +36,7 @@ type ContentData struct {
 	Title     string `json:"title"`
 	Thumbnail string `json:"thumbnail"`
 	Duration  string `json:"duration,omitempty"`
-	URL       string `json:"url"`
+	URL       string `json:"url,omitempty"`
 	Quality   string `json:"quality,omitempty"`
 	Author    Author `json:"author,omitempty"`
 }
@@ -50,6 +50,119 @@ type ContentResponse struct {
 	Download DownloadLinks `json:"download"`
 }
 
+type ContentVideoQuality struct {
+	Quality   string `json:"quality"`
+	Original  string `json:"original"`
+	Original1 string `json:"original_1,omitempty"`
+	Server1   string `json:"server_1"`
+	Server2   string `json:"server_2"`
+}
+
+type ContentAudio struct {
+	Original  string `json:"original"`
+	Original1 string `json:"original_1,omitempty"`
+	Server1   string `json:"server_1"`
+	Server2   string `json:"server_2"`
+}
+
+type ContentMultiDownload struct {
+	Video []ContentVideoQuality `json:"video"`
+	Audio *ContentAudio         `json:"audio,omitempty"`
+}
+
+type ContentMultiResponse struct {
+	Success  bool                 `json:"success"`
+	Services string               `json:"services"`
+	Sites    string               `json:"sites"`
+	Type     string               `json:"type"`
+	Data     ContentData          `json:"data"`
+	Download ContentMultiDownload `json:"download"`
+}
+
+type InstagramData struct {
+	URL       string  `json:"url,omitempty"`
+	Username  string  `json:"username,omitempty"`
+	Author    string  `json:"author,omitempty"`
+	ViewCount int64   `json:"view_count,omitempty"`
+	LikeCount int64   `json:"like_count,omitempty"`
+	Duration  float64 `json:"duration,omitempty"`
+	Title     string  `json:"title,omitempty"`
+	Thumbnail string  `json:"thumbnail,omitempty"`
+}
+
+type InstagramResponse struct {
+	Success  bool                 `json:"success"`
+	Services string               `json:"services"`
+	Sites    string               `json:"sites"`
+	Type     string               `json:"type"`
+	Data     InstagramData        `json:"data"`
+	Download ContentMultiDownload `json:"download"`
+}
+
+type TwitterData struct {
+	URL       string  `json:"url,omitempty"`
+	Author    string  `json:"author,omitempty"`
+	Duration  float64 `json:"duration,omitempty"`
+	Title     string  `json:"title,omitempty"`
+	Thumbnail string  `json:"thumbnail,omitempty"`
+}
+
+type TwitterResponse struct {
+	Success  bool                 `json:"success"`
+	Services string               `json:"services"`
+	Sites    string               `json:"sites"`
+	Type     string               `json:"type"`
+	Data     TwitterData          `json:"data"`
+	Download ContentMultiDownload `json:"download"`
+}
+
+type TikTokDataNew struct {
+	URL       string  `json:"url,omitempty"`
+	Author    string  `json:"author,omitempty"`
+	Username  string  `json:"username,omitempty"`
+	Title     string  `json:"title,omitempty"`
+	Thumbnail string  `json:"thumbnail,omitempty"`
+	Duration  float64 `json:"duration,omitempty"`
+}
+
+type TikTokResponseNew struct {
+	Success  bool                 `json:"success"`
+	Services string               `json:"services"`
+	Sites    string               `json:"sites"`
+	Type     string               `json:"type"`
+	Data     TikTokDataNew        `json:"data"`
+	Download ContentMultiDownload `json:"download"`
+}
+
+type ThreadsMediaItem struct {
+	Type      string `json:"type"`
+	Original  string `json:"original"`
+	Original1 string `json:"original_1,omitempty"`
+	Server1   string `json:"server_1,omitempty"`
+	Server2   string `json:"server_2,omitempty"`
+}
+
+type ThreadsDownload struct {
+	Media []ThreadsMediaItem `json:"media"`
+}
+
+type ThreadsData struct {
+	URL       string `json:"url,omitempty"`
+	Author    string `json:"author,omitempty"`
+	Title     string `json:"title,omitempty"`
+	Thumbnail string `json:"thumbnail,omitempty"`
+}
+
+type ThreadsResponse struct {
+	Success  bool            `json:"success"`
+	Services string          `json:"services"`
+	Sites    string          `json:"sites"`
+	Type     string          `json:"type"`
+	Data     ThreadsData     `json:"data"`
+	Download ThreadsDownload `json:"download"`
+}
+
+// convert
 type ConvertData struct {
 	Filename string `json:"filename"`
 	Size     int64  `json:"size"`
@@ -70,37 +183,4 @@ type ConvertResponse struct {
 	Download ConvertDownloadLinks `json:"download"`
 }
 
-type TikTokVideoQuality struct {
-	Quality  string `json:"quality"`
-	Original string `json:"original"`
-	Server1  string `json:"server_1"`
-	Server2  string `json:"server_2"`
-}
-
-type TikTokAudio struct {
-	Original string `json:"original"`
-	Server1  string `json:"server_1"`
-	Server2  string `json:"server_2"`
-}
-
-type TikTokDownload struct {
-	Video []TikTokVideoQuality `json:"video"`
-	Audio *TikTokAudio         `json:"audio,omitempty"`
-}
-
-type TikTokData struct {
-	ID        string `json:"id"`
-	Title     string `json:"title"`
-	Thumbnail string `json:"thumbnail"`
-	Duration  string `json:"duration"`
-	Author    Author `json:"author"`
-}
-
-type TikTokResponse struct {
-	Success  bool           `json:"success"`
-	Services string         `json:"services"`
-	Sites    string         `json:"sites"`
-	Type     string         `json:"type"`
-	Data     TikTokData     `json:"data"`
-	Download TikTokDownload `json:"download"`
-}
+// =====================================

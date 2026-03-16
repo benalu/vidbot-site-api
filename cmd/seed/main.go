@@ -48,6 +48,15 @@ func main() {
 			"instagram.com",
 			"instagr.am",
 		},
+		"allowed_domains:twitter": {
+			"twitter.com",
+			"x.com",
+			"t.co",
+		},
+		"allowed_domains:threads": {
+			"threads.net",
+			"threads.com",
+		},
 	}
 
 	for key, domains := range seeds {
@@ -84,13 +93,15 @@ func main() {
 		"content:provider:spotify",
 		"content:provider:tiktok",
 		"content:provider:instagram",
+		"content:provider:twitter",
+		"content:provider:threads",
 	}
 
 	for _, key := range contentProviderKeys {
 		if err := cache.Del(ctx, key); err != nil {
 			log.Printf("Failed to del %s: %v", key, err)
 		}
-		if err := cache.RPush(ctx, key, "downr"); err != nil {
+		if err := cache.RPush(ctx, key, "downr", "vidown"); err != nil {
 			log.Printf("Failed to seed %s: %v", key, err)
 			continue
 		}

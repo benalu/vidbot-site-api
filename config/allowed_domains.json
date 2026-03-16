@@ -18,6 +18,19 @@
     "vm.tiktok.com",
     "douyin.com"
   ],
+  "twitter": [
+    "twitter.com",
+    "x.com",
+    "t.co"
+],
+  "instagram": [
+    "instagram.com",
+    "instagr.am"
+  ],
+  "threads": [
+    "threads.net",
+    "threads.com"
+],
   "vidbos": [
     "vidbos.com"
   ],

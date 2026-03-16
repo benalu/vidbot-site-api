@@ -120,11 +120,29 @@ func (d *Downr) parseResult(data map[string]interface{}) *provider.MediaResult {
 		Title:     getString(data, "title"),
 		Thumbnail: getString(data, "thumbnail"),
 		Duration:  getString(data, "duration"),
+		URL:       getString(data, "url"),
 		Author: provider.Author{
 			Name:     getString(data, "author"),
-			Username: getString(data, "unique_id"),
+			Username: getOwnerUsername(data),
 		},
 	}
+
+	// view_count dan like_count
+	if v, ok := data["view_count"].(float64); ok {
+		result.ViewCount = int64(v)
+	}
+	if v, ok := data["like_count"].(float64); ok {
+		result.LikeCount = int64(v)
+	}
+
+	// duration dari float kalau string kosong
+	if result.Duration == "" {
+		if v, ok := data["duration"].(float64); ok && v > 0 {
+			result.Duration = fmt.Sprintf("%.0f", v)
+		}
+	}
+
+	source := getString(data, "source")
 
 	qualityPriority := map[string]int{
 		"hd_no_watermark": 4,
@@ -135,6 +153,35 @@ func (d *Downr) parseResult(data map[string]interface{}) *provider.MediaResult {
 	}
 
 	medias, _ := data["medias"].([]interface{})
+
+	// threads — pakai MediaItems
+	if source == "threads" {
+		for i, m := range medias {
+			media, ok := m.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			mediaType := getString(media, "type")
+			ext := getString(media, "extension")
+			if ext == "" {
+				if mediaType == "video" {
+					ext = "mp4"
+				} else {
+					ext = "jpg"
+				}
+			}
+			result.MediaItems = append(result.MediaItems, provider.MediaItem{
+				Index:     i,
+				Type:      mediaType,
+				URL:       getString(media, "url"),
+				Thumbnail: getString(media, "thumbnail"),
+				Extension: ext,
+			})
+		}
+		return result
+	}
+
+	// platform lain — pakai Videos/Audio
 	for _, m := range medias {
 		media, ok := m.(map[string]interface{})
 		if !ok {
@@ -163,6 +210,18 @@ func (d *Downr) parseResult(data map[string]interface{}) *provider.MediaResult {
 	return result
 }
 
+// helper untuk ambil username dari owner object
+func getOwnerUsername(data map[string]interface{}) string {
+	// cek unique_id dulu (TikTok)
+	if v := getString(data, "unique_id"); v != "" {
+		return v
+	}
+	// cek owner.username (Instagram)
+	if owner, ok := data["owner"].(map[string]interface{}); ok {
+		return getString(owner, "username")
+	}
+	return ""
+}
 func getDownrHeaders(ua, sessionCookie string) map[string]string {
 	headers := map[string]string{
 		"User-Agent":      ua,

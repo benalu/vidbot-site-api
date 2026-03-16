@@ -7,8 +7,11 @@ import (
 	"vidbot-api/internal/services/content/instagram"
 	contentprovider "vidbot-api/internal/services/content/provider"
 	"vidbot-api/internal/services/content/provider/downr"
+	"vidbot-api/internal/services/content/provider/vidown"
 	"vidbot-api/internal/services/content/spotify"
+	"vidbot-api/internal/services/content/threads"
 	"vidbot-api/internal/services/content/tiktok"
+	"vidbot-api/internal/services/content/twitter"
 	audioconvert "vidbot-api/internal/services/convert/audio"
 	docconvert "vidbot-api/internal/services/convert/document"
 	fontsconvert "vidbot-api/internal/services/convert/fonts"
@@ -32,8 +35,30 @@ func Setup(r *gin.Engine, cfg *config.Config) {
 	proxyClient := proxy.NewClient(cfg.WorkerURLs, cfg.WorkerSecret)
 	contentProxyClient := proxy.NewClient([]string{cfg.ContentWorkerURL}, cfg.ContentWorkerSecret)
 
-	providers := []contentprovider.Provider{
+	// providers per kategori
+	tiktokProviders := []contentprovider.Provider{
 		downr.New(contentProxyClient),
+		vidown.New(contentProxyClient),
+	}
+
+	instagramProviders := []contentprovider.Provider{
+		downr.New(contentProxyClient),
+		vidown.NewForPlatform(contentProxyClient, "instagram"),
+	}
+
+	twitterProviders := []contentprovider.Provider{
+		downr.New(contentProxyClient),
+		vidown.NewForPlatform(contentProxyClient, "twitter"),
+	}
+
+	threadsProviders := []contentprovider.Provider{
+		downr.New(contentProxyClient),
+		vidown.NewForPlatform(contentProxyClient, "threads"),
+	}
+
+	spotifyProviders := []contentprovider.Provider{
+		downr.New(contentProxyClient),
+		// vidown tidak support spotify
 	}
 
 	convertProviders := []convertprovider.Provider{
@@ -49,9 +74,11 @@ func Setup(r *gin.Engine, cfg *config.Config) {
 	vidbosHandler := vidbos.NewHandler(cfg.DownloadWorkerURL, cfg.DownloadWorkerSecret, cfg.WorkerPayloadXORKey, cfg.AppURL, cfg.StreamSecret)
 	vidaratoHandler := vidarato.NewHandler(proxyClient, cfg.DownloadWorkerURL, cfg.DownloadWorkerSecret, cfg.WorkerPayloadXORKey, cfg.AppURL, cfg.StreamSecret, cfg.ToolsDir)
 	vidnestHandler := vidnest.NewHandler(proxyClient, cfg.DownloadWorkerURL, cfg.DownloadWorkerSecret, cfg.WorkerPayloadXORKey, cfg.AppURL, cfg.StreamSecret)
-	spotifyHandler := spotify.NewHandler(providers, cfg.DownloadWorkerURL, cfg.DownloadWorkerSecret, cfg.WorkerPayloadXORKey, cfg.AppURL, cfg.StreamSecret)
-	tiktokHandler := tiktok.NewHandler(providers, cfg.DownloadWorkerURL, cfg.DownloadWorkerSecret, cfg.WorkerPayloadXORKey, cfg.AppURL, cfg.StreamSecret)
-	instagramHandler := instagram.NewHandler(providers, cfg.DownloadWorkerURL, cfg.DownloadWorkerSecret, cfg.WorkerPayloadXORKey, cfg.AppURL, cfg.StreamSecret)
+	spotifyHandler := spotify.NewHandler(spotifyProviders, cfg.DownloadWorkerURL, cfg.DownloadWorkerSecret, cfg.WorkerPayloadXORKey, cfg.AppURL, cfg.StreamSecret)
+	tiktokHandler := tiktok.NewHandler(tiktokProviders, cfg.DownloadWorkerURL, cfg.DownloadWorkerSecret, cfg.WorkerPayloadXORKey, cfg.AppURL, cfg.StreamSecret)
+	instagramHandler := instagram.NewHandler(instagramProviders, cfg.DownloadWorkerURL, cfg.DownloadWorkerSecret, cfg.WorkerPayloadXORKey, cfg.AppURL, cfg.StreamSecret)
+	twitterHandler := twitter.NewHandler(twitterProviders, cfg.DownloadWorkerURL, cfg.DownloadWorkerSecret, cfg.WorkerPayloadXORKey, cfg.AppURL, cfg.StreamSecret)
+	threadsHandler := threads.NewHandler(threadsProviders, cfg.DownloadWorkerURL, cfg.DownloadWorkerSecret, cfg.WorkerPayloadXORKey, cfg.AppURL, cfg.StreamSecret)
 	audioConvertHandler := audioconvert.NewHandler(
 		convertProviders,
 		cfg.DownloadWorkerURL,
@@ -121,6 +148,8 @@ func Setup(r *gin.Engine, cfg *config.Config) {
 		content.POST("/spotify", spotifyHandler.Extract)
 		content.POST("/tiktok", tiktokHandler.Extract)
 		content.POST("/instagram", instagramHandler.Extract)
+		content.POST("/twitter", twitterHandler.Extract)
+		content.POST("/threads", threadsHandler.Extract)
 	}
 
 	convert := r.Group("/convert",

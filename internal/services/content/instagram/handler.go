@@ -3,6 +3,7 @@ package instagram
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"vidbot-api/internal/services/content/provider"
@@ -61,27 +62,28 @@ func (h *Handler) Extract(c *gin.Context) {
 		return
 	}
 
-	// cek cache dulu
-	if cached, err := downloader.CacheGet[mediaresponse.TikTokResponse]("content", "instagram", req.URL); err == nil && cached != nil {
+	if cached, err := downloader.CacheGet[mediaresponse.InstagramResponse]("content", "instagram", req.URL); err == nil && cached != nil {
 		for i, v := range cached.Download.Video {
 			ext := "mp4"
+			customTitle := fmt.Sprintf("%s_%s", cached.Data.Author, v.Quality)
 			cached.Download.Video[i].Server1 = downloader.GenerateServer1URL(
 				h.downloadWorkerURL, h.downloadWorkerSecret, h.workerXORKey,
-				v.Original, cached.Data.Title, "", "", ext, "content",
+				v.Original, customTitle, "", "", ext, "content",
 			)
 			cached.Download.Video[i].Server2 = downloader.GenerateServer2URL(
 				h.appURL, h.streamSecret,
-				v.Original, cached.Data.Title, "", "", ext, "content",
+				v.Original, customTitle, "", "", ext, "content",
 			)
 		}
 		if cached.Download.Audio != nil {
+			audioTitle := fmt.Sprintf("%s_audio", cached.Data.Author)
 			cached.Download.Audio.Server1 = downloader.GenerateServer1URL(
 				h.downloadWorkerURL, h.downloadWorkerSecret, h.workerXORKey,
-				cached.Download.Audio.Original, cached.Data.Title, "", "", "mp3", "content",
+				cached.Download.Audio.Original, audioTitle, "", "", "mp3", "content",
 			)
 			cached.Download.Audio.Server2 = downloader.GenerateServer2URL(
 				h.appURL, h.streamSecret,
-				cached.Download.Audio.Original, cached.Data.Title, "", "", "mp3", "content",
+				cached.Download.Audio.Original, audioTitle, "", "", "mp3", "content",
 			)
 		}
 		writeJSONUnescaped(c, http.StatusOK, cached)
@@ -95,43 +97,47 @@ func (h *Handler) Extract(c *gin.Context) {
 		return
 	}
 
-	videos := []mediaresponse.TikTokVideoQuality{}
+	videos := []mediaresponse.ContentVideoQuality{}
 	for _, v := range result.Videos {
 		ext := v.Extension
 		if ext == "" {
 			ext = "mp4"
 		}
+		customTitle := fmt.Sprintf("%s_%s", result.Author.Name, v.Quality)
 		server1 := downloader.GenerateServer1URL(
 			h.downloadWorkerURL, h.downloadWorkerSecret, h.workerXORKey,
-			v.URL, result.Title, "", "", ext, "content",
+			v.URL, customTitle, "", "", ext, "content",
 		)
 		server2 := downloader.GenerateServer2URL(
 			h.appURL, h.streamSecret,
-			v.URL, result.Title, "", "", ext, "content",
+			v.URL, customTitle, "", "", ext, "content",
 		)
-		videos = append(videos, mediaresponse.TikTokVideoQuality{
-			Quality:  v.Quality,
-			Original: v.URL,
-			Server1:  server1,
-			Server2:  server2,
+		videos = append(videos, mediaresponse.ContentVideoQuality{
+			Quality:   v.Quality,
+			Original:  v.URL,
+			Original1: v.URL2,
+			Server1:   server1,
+			Server2:   server2,
 		})
 	}
 
-	var audio *mediaresponse.TikTokAudio
+	var audio *mediaresponse.ContentAudio
 	if result.AudioURL != "" {
 		audioExt := result.AudioExt
 		if audioExt == "" {
 			audioExt = "mp3"
 		}
-		audio = &mediaresponse.TikTokAudio{
-			Original: result.AudioURL,
+		audioTitle := fmt.Sprintf("%s_audio", result.Author.Name)
+		audio = &mediaresponse.ContentAudio{
+			Original:  result.AudioURL,
+			Original1: result.AudioURL2,
 			Server1: downloader.GenerateServer1URL(
 				h.downloadWorkerURL, h.downloadWorkerSecret, h.workerXORKey,
-				result.AudioURL, result.Title, "", "", audioExt, "content",
+				result.AudioURL, audioTitle, "", "", audioExt, "content",
 			),
 			Server2: downloader.GenerateServer2URL(
 				h.appURL, h.streamSecret,
-				result.AudioURL, result.Title, "", "", audioExt, "content",
+				result.AudioURL, audioTitle, "", "", audioExt, "content",
 			),
 		}
 	}
@@ -141,39 +147,46 @@ func (h *Handler) Extract(c *gin.Context) {
 		mediaType = result.AudioExt
 	}
 
-	res := mediaresponse.TikTokResponse{
+	res := mediaresponse.InstagramResponse{
 		Success:  true,
 		Services: "content",
 		Sites:    "instagram",
 		Type:     mediaType,
-		Data: mediaresponse.TikTokData{
-			ID:        result.ID,
+		Data: mediaresponse.InstagramData{
+			URL:       result.URL,
+			Username:  result.Author.Username,
+			Author:    result.Author.Name,
+			ViewCount: result.ViewCount,
+			LikeCount: result.LikeCount,
+			Duration:  mediaresponse.ParseDuration(result.Duration),
 			Title:     result.Title,
 			Thumbnail: result.Thumbnail,
-			Duration:  result.Duration,
-			Author: mediaresponse.Author{
-				Name:     result.Author.Name,
-				Username: result.Author.Username,
-			},
 		},
-		Download: mediaresponse.TikTokDownload{
+		Download: mediaresponse.ContentMultiDownload{
 			Video: videos,
 			Audio: audio,
 		},
 	}
 
-	// simpan ke cache TANPA server_1 dan server_2
+	cacheVideos := make([]mediaresponse.ContentVideoQuality, len(res.Download.Video))
+	for i, v := range res.Download.Video {
+		cacheVideos[i] = mediaresponse.ContentVideoQuality{
+			Quality:   v.Quality,
+			Original:  v.Original,
+			Original1: v.Original1,
+		}
+	}
+	var cacheAudio *mediaresponse.ContentAudio
+	if res.Download.Audio != nil {
+		a := mediaresponse.ContentAudio{
+			Original:  res.Download.Audio.Original,
+			Original1: res.Download.Audio.Original1,
+		}
+		cacheAudio = &a
+	}
 	cacheRes := res
-	for i := range cacheRes.Download.Video {
-		cacheRes.Download.Video[i].Server1 = ""
-		cacheRes.Download.Video[i].Server2 = ""
-	}
-	if cacheRes.Download.Audio != nil {
-		audioCache := *cacheRes.Download.Audio
-		audioCache.Server1 = ""
-		audioCache.Server2 = ""
-		cacheRes.Download.Audio = &audioCache
-	}
+	cacheRes.Download.Video = cacheVideos
+	cacheRes.Download.Audio = cacheAudio
 	downloader.CacheSet("content", "instagram", req.URL, &cacheRes)
 
 	writeJSONUnescaped(c, http.StatusOK, res)

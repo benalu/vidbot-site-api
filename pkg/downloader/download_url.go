@@ -194,6 +194,7 @@ func GenerateServer2URL(appURL, streamSecret, downloadURL, title, filename, file
 		Secret:   streamSecret,
 	})
 	if err != nil {
+
 		return ""
 	}
 	base := strings.TrimRight(appURL, "/")

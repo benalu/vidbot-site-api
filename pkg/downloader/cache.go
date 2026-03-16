@@ -19,8 +19,9 @@ var cacheTTL = map[string]time.Duration{
 	"vidhub:vidarato":   2 * time.Hour,
 	"vidhub:vidnest":    2 * time.Hour,
 	"content:spotify":   30 * 24 * time.Hour,
-	"content:tiktok":    30 * time.Minute,
+	"content:tiktok":    2 * time.Hour,
 	"content:instagram": 30 * time.Minute,
+	"content:twitter":   2 * time.Hour,
 }
 
 func defaultTTL() time.Duration {

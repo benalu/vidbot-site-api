@@ -1,4 +1,4 @@
-package tiktok
+package twitter
 
 import (
 	"bytes"
@@ -57,12 +57,12 @@ func (h *Handler) Extract(c *gin.Context) {
 		return
 	}
 
-	if !validator.IsValidURL(req.URL) || !validator.IsAllowedDomain(req.URL, "tiktok") {
+	if !validator.IsValidURL(req.URL) || !validator.IsAllowedDomain(req.URL, "twitter") {
 		response.ErrorWithCode(c, 400, "INVALID_URL", "URL not supported for this endpoint.")
 		return
 	}
 
-	if cached, err := downloader.CacheGet[mediaresponse.TikTokResponseNew]("content", "tiktok", req.URL); err == nil && cached != nil {
+	if cached, err := downloader.CacheGet[mediaresponse.TwitterResponse]("content", "twitter", req.URL); err == nil && cached != nil {
 		for i, v := range cached.Download.Video {
 			ext := "mp4"
 			customTitle := fmt.Sprintf("%s_%s", cached.Data.Author, v.Quality)
@@ -92,7 +92,7 @@ func (h *Handler) Extract(c *gin.Context) {
 
 	result, err := h.service.Extract(req.URL)
 	if err != nil {
-		log.Printf("[tiktok] extract error: %v", err)
+		log.Printf("[twitter] extract error: %v", err)
 		response.ErrorWithCode(c, 500, "EXTRACTION_FAILED", "Failed to extract media. Please check the URL and try again.")
 		return
 	}
@@ -147,18 +147,17 @@ func (h *Handler) Extract(c *gin.Context) {
 		mediaType = result.AudioExt
 	}
 
-	res := mediaresponse.TikTokResponseNew{
+	res := mediaresponse.TwitterResponse{
 		Success:  true,
 		Services: "content",
-		Sites:    "tiktok",
+		Sites:    "twitter",
 		Type:     mediaType,
-		Data: mediaresponse.TikTokDataNew{
+		Data: mediaresponse.TwitterData{
 			URL:       result.URL,
 			Author:    result.Author.Name,
-			Username:  result.Author.Username,
+			Duration:  mediaresponse.ParseDuration(result.Duration),
 			Title:     result.Title,
 			Thumbnail: result.Thumbnail,
-			Duration:  mediaresponse.ParseDuration(result.Duration),
 		},
 		Download: mediaresponse.ContentMultiDownload{
 			Video: videos,
@@ -185,7 +184,7 @@ func (h *Handler) Extract(c *gin.Context) {
 	cacheRes := res
 	cacheRes.Download.Video = cacheVideos
 	cacheRes.Download.Audio = cacheAudio
-	downloader.CacheSet("content", "tiktok", req.URL, &cacheRes)
+	downloader.CacheSet("content", "twitter", req.URL, &cacheRes)
 
 	writeJSONUnescaped(c, http.StatusOK, res)
 }
