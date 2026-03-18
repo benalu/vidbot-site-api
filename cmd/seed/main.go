@@ -17,6 +17,7 @@ func main() {
 	seeds := map[string][]string{
 		"allowed_domains:videb": {
 			"videb.co",
+			"videb.lol",
 		},
 		"allowed_domains:vidoy": {
 			"vidoy.co",

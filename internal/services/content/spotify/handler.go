@@ -61,7 +61,7 @@ func (h *Handler) Extract(c *gin.Context) {
 		return
 	}
 
-	if cached, err := downloader.CacheGet[mediaresponse.ContentResponse]("content", "spotify", req.URL); err == nil && cached != nil {
+	if cached, err := downloader.CacheGet[mediaresponse.SpotifyResponse]("content", "spotify", req.URL); err == nil && cached != nil {
 		cached.Download.Server1 = downloader.GenerateServer1URL(
 			h.downloadWorkerURL, h.downloadWorkerSecret, h.workerXORKey,
 			cached.Download.Original, cached.Data.Title, "", "", cached.Type, "content",
@@ -86,20 +86,21 @@ func (h *Handler) Extract(c *gin.Context) {
 		ext = "mp3"
 	}
 
-	res := mediaresponse.ContentResponse{
+	res := mediaresponse.SpotifyResponse{
 		Success:  true,
 		Services: "content",
 		Sites:    "spotify",
 		Type:     ext,
-		Data: mediaresponse.ContentData{
+		Data: mediaresponse.SpotifyData{
+			URL:       result.URL,
 			Title:     result.Title,
+			Author:    result.Author.Name,
 			Thumbnail: result.Thumbnail,
 			Duration:  result.Duration,
-			URL:       result.AudioURL,
+			TrackID:   result.TrackID,
 			Quality:   result.Quality,
-			Author:    mediaresponse.Author{Name: result.Author.Name},
 		},
-		Download: mediaresponse.DownloadLinks{
+		Download: mediaresponse.SpotifyDownload{
 			Original: result.AudioURL,
 		},
 	}
@@ -107,7 +108,7 @@ func (h *Handler) Extract(c *gin.Context) {
 	// simpan ke cache TANPA server_1 dan server_2
 	downloader.CacheSet("content", "spotify", req.URL, &res)
 
-	// tambah server_1 dan server_2 setelah cache disimpan
+	// tambah server_1 dan server_2 setelah cache
 	res.Download.Server1 = downloader.GenerateServer1URL(
 		h.downloadWorkerURL, h.downloadWorkerSecret, h.workerXORKey,
 		result.AudioURL, result.Title, "", "", ext, "content",

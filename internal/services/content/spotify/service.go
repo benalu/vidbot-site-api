@@ -17,6 +17,8 @@ type ExtractionResult struct {
 	Title     string
 	Thumbnail string
 	Duration  string
+	URL       string
+	TrackID   string
 	Author    provider.Author
 	AudioURL  string
 	AudioExt  string
@@ -42,6 +44,8 @@ func (s *Service) Extract(url string) (*ExtractionResult, error) {
 			Title:     result.Title,
 			Thumbnail: result.Thumbnail,
 			Duration:  result.Duration,
+			URL:       result.URL,
+			TrackID:   result.TrackID,
 			Author:    result.Author,
 			AudioURL:  result.Audio.URL,
 			AudioExt:  result.Audio.Extension,

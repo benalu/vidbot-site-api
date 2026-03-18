@@ -44,6 +44,7 @@ type MediaResult struct {
 	Audio      *Audio      `json:"audio,omitempty"`
 	MediaItems []MediaItem `json:"media_items,omitempty"` // untuk threads
 	URL        string      `json:"url,omitempty"`
+	TrackID    string      `json:"track_id,omitempty"`
 	ViewCount  int64       `json:"view_count,omitempty"`
 	LikeCount  int64       `json:"like_count,omitempty"`
 }

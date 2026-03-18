@@ -121,6 +121,7 @@ func (d *Downr) parseResult(data map[string]interface{}) *provider.MediaResult {
 		Thumbnail: getString(data, "thumbnail"),
 		Duration:  getString(data, "duration"),
 		URL:       getString(data, "url"),
+		TrackID:   getString(data, "track_id"),
 		Author: provider.Author{
 			Name:     getString(data, "author"),
 			Username: getOwnerUsername(data),

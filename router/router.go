@@ -1,6 +1,7 @@
 package router
 
 import (
+	"log"
 	"vidbot-api/config"
 	"vidbot-api/internal/admin"
 	"vidbot-api/internal/auth"
@@ -19,6 +20,7 @@ import (
 	convertprovider "vidbot-api/internal/services/convert/provider"
 	ccprovider "vidbot-api/internal/services/convert/provider/cloudconvert"
 	convertioprovider "vidbot-api/internal/services/convert/provider/convertio"
+	"vidbot-api/internal/services/iptv"
 	"vidbot-api/internal/services/vidhub/vidarato"
 	"vidbot-api/internal/services/vidhub/vidbos"
 	"vidbot-api/internal/services/vidhub/videb"
@@ -26,6 +28,7 @@ import (
 	"vidbot-api/internal/services/vidhub/vidoy"
 	"vidbot-api/internal/stream"
 	"vidbot-api/middleware"
+	"vidbot-api/pkg/iptvstore"
 	"vidbot-api/pkg/proxy"
 
 	"github.com/gin-gonic/gin"
@@ -34,6 +37,9 @@ import (
 func Setup(r *gin.Engine, cfg *config.Config) {
 	proxyClient := proxy.NewClient(cfg.WorkerURLs, cfg.WorkerSecret)
 	contentProxyClient := proxy.NewClient([]string{cfg.ContentWorkerURL}, cfg.ContentWorkerSecret)
+	if err := iptvstore.Default.Init(); err != nil {
+		log.Printf("[iptv] init error: %v", err)
+	}
 
 	// providers per kategori
 	tiktokProviders := []contentprovider.Provider{
@@ -69,6 +75,7 @@ func Setup(r *gin.Engine, cfg *config.Config) {
 	streamHandler := stream.NewHandler()
 	authHandler := &auth.Handler{MagicString: cfg.MagicString}
 	adminHandler := admin.NewHandler(cfg.MasterKey)
+	iptvHandler := iptv.NewHandler()
 	videbHandler := videb.NewHandler(proxyClient, cfg.DownloadWorkerURL, cfg.DownloadWorkerSecret, cfg.WorkerPayloadXORKey, cfg.AppURL, cfg.StreamSecret)
 	vidoyHandler := vidoy.NewHandler(proxyClient, cfg.DownloadWorkerURL, cfg.DownloadWorkerSecret, cfg.WorkerPayloadXORKey, cfg.AppURL, cfg.StreamSecret)
 	vidbosHandler := vidbos.NewHandler(cfg.DownloadWorkerURL, cfg.DownloadWorkerSecret, cfg.WorkerPayloadXORKey, cfg.AppURL, cfg.StreamSecret)
@@ -168,4 +175,15 @@ func Setup(r *gin.Engine, cfg *config.Config) {
 		convert.POST("/fonts/upload", fontsConvertHandler.Upload)
 		convert.GET("/status/:job_id", audioConvertHandler.Status)
 	}
+	iptvGroup := r.Group("/iptv",
+		middleware.RequireAPIKey(),
+		middleware.RequireAccessToken(cfg.MagicString),
+		middleware.RateLimit("iptv"),
+	)
+	{
+		iptvGroup.GET("/channels", iptvHandler.GetChannels)
+		iptvGroup.GET("/countries", iptvHandler.GetCountries)
+		iptvGroup.GET("/categories", iptvHandler.GetCategories)
+	}
+
 }
