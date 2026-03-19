@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"net/url"
 	"os/exec"
-	"strings"
 	"vidbot-api/pkg/downloader"
+	"vidbot-api/pkg/fileutil"
 	"vidbot-api/pkg/limiter"
 
 	"github.com/gin-gonic/gin"
@@ -53,32 +53,6 @@ func (h *Handler) Stream(c *gin.Context, streamSecret, toolsDir string) {
 	}
 }
 
-func sanitizeFilenameWithExt(filename, ext string) string {
-	// pisahkan nama dan ekstensi
-	suffix := "." + ext
-	name := filename
-	if strings.HasSuffix(strings.ToLower(filename), suffix) {
-		name = filename[:len(filename)-len(suffix)]
-	}
-
-	// sanitize nama
-	var result []rune
-	for _, r := range name {
-		if r > 127 || r == '"' || r == '/' || r == '\\' || r == ':' || r == '*' || r == '?' || r == '<' || r == '>' || r == '|' {
-			continue
-		}
-		result = append(result, r)
-	}
-	s := strings.TrimSpace(string(result))
-	if len(s) > 80 {
-		s = s[:80]
-	}
-	if s == "" {
-		s = "vidbot_download"
-	}
-	return s + suffix
-}
-
 func (h *Handler) streamDirect(c *gin.Context, payload *downloader.Payload) {
 	if !limiter.DirectStream.Acquire() {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
@@ -95,7 +69,7 @@ func (h *Handler) streamDirect(c *gin.Context, payload *downloader.Payload) {
 		ext = "mp4"
 	}
 	rawName := downloader.ResolveFilename(payload.Title, payload.Filename, payload.Filecode, ext)
-	filename := sanitizeFilenameWithExt(rawName, ext)
+	filename := fileutil.SanitizeWithExt(rawName, ext)
 
 	req, err := http.NewRequestWithContext(c.Request.Context(), "GET", payload.URL, nil)
 	if err != nil {
@@ -166,7 +140,7 @@ func (h *Handler) streamViaYTDLP(c *gin.Context, payload *downloader.Payload, to
 	defer limiter.HLSDownload.Release()
 
 	rawName := downloader.ResolveFilename(payload.Title, payload.Filename, payload.Filecode, "mp4")
-	filename := sanitizeFilenameWithExt(rawName, "mp4")
+	filename := fileutil.SanitizeWithExt(rawName, "mp4")
 
 	ytdlpPath := "yt-dlp"
 	if toolsDir != "" {
