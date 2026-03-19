@@ -53,5 +53,5 @@ func (s *Service) Extract(url string) (*ExtractionResult, error) {
 		}, nil
 	}
 
-	return nil, fmt.Errorf("all providers failed: %w", lastErr)
+	return nil, fmt.Errorf("service is temporarily unavailable: %w", lastErr)
 }

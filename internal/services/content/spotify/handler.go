@@ -1,12 +1,10 @@
 package spotify
 
 import (
-	"bytes"
-	"encoding/json"
 	"log"
-	"net/http"
 	"vidbot-api/internal/services/content/provider"
 	"vidbot-api/pkg/downloader"
+	"vidbot-api/pkg/httputil"
 	"vidbot-api/pkg/mediaresponse"
 	"vidbot-api/pkg/response"
 	"vidbot-api/pkg/validator"
@@ -41,14 +39,6 @@ type Request struct {
 	URL string `json:"url" binding:"required"`
 }
 
-func writeJSONUnescaped(c *gin.Context, status int, data interface{}) {
-	buf := &bytes.Buffer{}
-	encoder := json.NewEncoder(buf)
-	encoder.SetEscapeHTML(false)
-	encoder.Encode(data)
-	c.Data(status, "application/json; charset=utf-8", buf.Bytes())
-}
-
 func (h *Handler) Extract(c *gin.Context) {
 	var req Request
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -70,14 +60,14 @@ func (h *Handler) Extract(c *gin.Context) {
 			h.appURL, h.streamSecret,
 			cached.Download.Original, cached.Data.Title, "", "", cached.Type, "content",
 		)
-		writeJSONUnescaped(c, http.StatusOK, cached)
+		httputil.WriteJSONOK(c, cached)
 		return
 	}
 
 	result, err := h.service.Extract(req.URL)
 	if err != nil {
 		log.Printf("[spotify] extract error: %v", err)
-		response.ErrorWithCode(c, 500, "EXTRACTION_FAILED", "Failed to extract media. Please check the URL and try again.")
+		response.ErrorWithCode(c, 500, "EXTRACTION_FAILED", "Unable to process the requested URL. The content may be private, deleted, or temporarily unavailable.")
 		return
 	}
 
@@ -118,5 +108,5 @@ func (h *Handler) Extract(c *gin.Context) {
 		result.AudioURL, result.Title, "", "", ext, "content",
 	)
 
-	writeJSONUnescaped(c, http.StatusOK, res)
+	httputil.WriteJSONOK(c, res)
 }

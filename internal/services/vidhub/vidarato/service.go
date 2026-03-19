@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"vidbot-api/pkg/fileutil"
 	"vidbot-api/pkg/proxy"
 
 	http "github.com/bogdanfinn/fhttp"
@@ -53,7 +54,7 @@ func (s *Service) Extract(rawURL string) (*Result, error) {
 		title = filecode
 	}
 	title = regexp.MustCompile(`(?i)\.mp4$`).ReplaceAllString(title, "")
-	filename := sanitizeFilename(title) + ".mp4"
+	filename := fileutil.Sanitize(title) + ".mp4"
 
 	return &Result{
 		Filecode:  filecode,
@@ -180,13 +181,4 @@ func extractFilecode(rawURL string) string {
 		return m[1]
 	}
 	return ""
-}
-
-func sanitizeFilename(name string) string {
-	name = regexp.MustCompile(`[<>:"/\\|?*\x00-\x1f]`).ReplaceAllString(name, "_")
-	name = strings.TrimSpace(name)
-	if len(name) > 200 {
-		name = name[:200]
-	}
-	return name
 }

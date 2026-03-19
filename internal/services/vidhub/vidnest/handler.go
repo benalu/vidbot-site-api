@@ -1,11 +1,9 @@
 package vidnest
 
 import (
-	"bytes"
-	"encoding/json"
 	"log"
-	"net/http"
 	"vidbot-api/pkg/downloader"
+	"vidbot-api/pkg/httputil"
 	"vidbot-api/pkg/mediaresponse"
 	"vidbot-api/pkg/proxy"
 	"vidbot-api/pkg/response"
@@ -38,14 +36,6 @@ type Request struct {
 	URL string `json:"url" binding:"required"`
 }
 
-func writeJSONUnescaped(c *gin.Context, status int, data interface{}) {
-	buf := &bytes.Buffer{}
-	encoder := json.NewEncoder(buf)
-	encoder.SetEscapeHTML(false)
-	encoder.Encode(data)
-	c.Data(status, "application/json; charset=utf-8", buf.Bytes())
-}
-
 func (h *Handler) Extract(c *gin.Context) {
 	var req Request
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -68,14 +58,14 @@ func (h *Handler) Extract(c *gin.Context) {
 			h.appURL, h.streamSecret,
 			cached.Download.Original, cached.Data.Title, cached.Data.Filename, cached.Data.Filecode, ext, "vidhub",
 		)
-		writeJSONUnescaped(c, http.StatusOK, cached)
+		httputil.WriteJSONOK(c, cached)
 		return
 	}
 
 	result, err := h.service.Extract(req.URL)
 	if err != nil {
 		log.Printf("[vidnest] extract error: %v", err)
-		response.ErrorWithCode(c, 500, "EXTRACTION_FAILED", "Failed to extract media. Please check the URL and try again.")
+		response.ErrorWithCode(c, 500, "EXTRACTION_FAILED", "Unable to process the requested URL. The content may be unavailable or the link has expired.")
 		return
 	}
 
@@ -110,5 +100,5 @@ func (h *Handler) Extract(c *gin.Context) {
 		result.DownloadURL, result.Title, result.Filename, result.Filecode, ext, "vidhub",
 	)
 
-	writeJSONUnescaped(c, http.StatusOK, res)
+	httputil.WriteJSONOK(c, res)
 }

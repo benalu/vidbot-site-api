@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"vidbot-api/pkg/fileutil"
 	"vidbot-api/pkg/proxy"
 )
 
@@ -120,7 +121,7 @@ func (s *Service) Extract(rawURL string) (*ExtractionResult, error) {
 		thumbnail = m[1]
 	}
 
-	filename := sanitizeFilename(title) + ".mp4"
+	filename := fileutil.Sanitize(title) + ".mp4"
 
 	return &ExtractionResult{
 		Filecode:    filecode,
@@ -130,9 +131,4 @@ func (s *Service) Extract(rawURL string) (*ExtractionResult, error) {
 		Size:        0,
 		Thumbnail:   thumbnail,
 	}, nil
-}
-
-func sanitizeFilename(name string) string {
-	re := regexp.MustCompile(`[<>:"/\\|?*]`)
-	return re.ReplaceAllString(name, "_")
 }

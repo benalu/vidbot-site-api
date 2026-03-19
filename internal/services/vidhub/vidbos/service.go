@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"vidbot-api/pkg/fileutil"
 
 	http "github.com/bogdanfinn/fhttp"
 	tls_client "github.com/bogdanfinn/tls-client"
@@ -46,7 +47,7 @@ func (s *Service) Extract(url string) (*Result, error) {
 		title = regexp.MustCompile(`(?i)\.mp4$`).ReplaceAllString(title, "")
 	}
 
-	filename := sanitizeFilename(title) + ".mp4"
+	filename := fileutil.Sanitize(title) + ".mp4"
 
 	return &Result{
 		Filecode:    filecode,
@@ -269,16 +270,6 @@ func contains(slice []string, s string) bool {
 		}
 	}
 	return false
-}
-
-func sanitizeFilename(name string) string {
-	re := regexp.MustCompile(`[<>:"/\\|?*\x00-\x1f]`)
-	name = re.ReplaceAllString(name, "_")
-	name = strings.TrimSpace(name)
-	if len(name) > 200 {
-		name = name[:200]
-	}
-	return name
 }
 
 func readBody(resp *http.Response) string {

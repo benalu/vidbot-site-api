@@ -61,7 +61,7 @@ func (h *Handler) Extract(c *gin.Context) {
 	result, err := h.service.Extract(req.URL)
 	if err != nil {
 		log.Printf("[vidoy] extract error: %v", err)
-		response.ErrorWithCode(c, 500, "EXTRACTION_FAILED", "Failed to extract media. Please check the URL and try again.")
+		response.ErrorWithCode(c, 500, "EXTRACTION_FAILED", "Unable to process the requested URL. The content may be unavailable or the link has expired.")
 		return
 	}
 

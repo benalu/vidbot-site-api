@@ -37,52 +37,54 @@ func (s *Service) Extract(url string) (*ExtractionResult, error) {
 	ordered := provider.ResolveProviderForCategory(s.providers, "twitter")
 
 	if len(ordered) == 0 {
-		return nil, fmt.Errorf("no providers available")
+		return nil, fmt.Errorf("service is temporarily unavailable")
 	}
 
-	primaryCh := make(chan *provider.MediaResult, 1)
-	secondaryCh := make(chan *provider.MediaResult, 1)
+	type extractResult struct {
+		media *provider.MediaResult
+		err   error
+	}
+
+	primaryCh := make(chan extractResult, 1)
+	secondaryCh := make(chan extractResult, 1)
 
 	for i, p := range ordered {
 		ch := secondaryCh
 		if i == 0 {
 			ch = primaryCh
 		}
-		go func(pr provider.Provider, out chan *provider.MediaResult) {
+		go func(pr provider.Provider, out chan extractResult) {
 			res, err := pr.Extract(url)
-			if err != nil || res == nil {
-				out <- nil
-				return
-			}
-			out <- res
+			out <- extractResult{media: res, err: err}
 		}(p, ch)
 	}
 
 	if len(ordered) == 1 {
-		primary := <-primaryCh
-		if primary == nil {
-			return nil, fmt.Errorf("provider failed")
+		r := <-primaryCh
+		if r.err != nil || r.media == nil {
+			return nil, fmt.Errorf("service is temporarily unavailable: %w", r.err)
 		}
-		return buildResult(primary, nil), nil
+		return buildResult(r.media, nil), nil
 	}
 
-	primary := <-primaryCh
+	r := <-primaryCh
 
-	if primary == nil {
-		secondary := <-secondaryCh
-		if secondary == nil {
-			return nil, fmt.Errorf("all providers failed")
+	if r.err != nil || r.media == nil {
+		r2 := <-secondaryCh
+		if r2.err != nil || r2.media == nil {
+			return nil, fmt.Errorf("service is temporarily unavailable: primary=%v, secondary=%v", r.err, r2.err)
 		}
-		return buildResult(secondary, nil), nil
+		return buildResult(r2.media, nil), nil
 	}
 
 	var secondary *provider.MediaResult
 	select {
-	case secondary = <-secondaryCh:
-	case <-time.After(3 * time.Second):
+	case r2 := <-secondaryCh:
+		secondary = r2.media
+	case <-time.After(1 * time.Second):
 	}
 
-	return buildResult(primary, secondary), nil
+	return buildResult(r.media, secondary), nil
 }
 
 func buildResult(primary, secondary *provider.MediaResult) *ExtractionResult {

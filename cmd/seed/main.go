@@ -23,6 +23,7 @@ func main() {
 			"vidoy.co",
 			"vidoy.cam",
 			"vidstrm.cloud",
+			"vidstring.com",
 		},
 		"allowed_domains:vidbos": {
 			"vidbos.com",
