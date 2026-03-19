@@ -22,6 +22,7 @@ var cacheTTL = map[string]time.Duration{
 	"content:tiktok":    2 * time.Hour,
 	"content:instagram": 30 * time.Minute,
 	"content:twitter":   2 * time.Hour,
+	"content:threads":   30 * time.Minute,
 }
 
 func defaultTTL() time.Duration {

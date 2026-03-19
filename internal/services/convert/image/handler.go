@@ -1,14 +1,14 @@
 package image
 
 import (
-	"bytes"
-	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"vidbot-api/internal/services/convert/provider"
 	"vidbot-api/pkg/convertvalidator"
 	"vidbot-api/pkg/downloader"
+	"vidbot-api/pkg/httputil"
 	"vidbot-api/pkg/mediaresponse"
 	"vidbot-api/pkg/response"
 	"vidbot-api/pkg/validator"
@@ -23,14 +23,6 @@ type Handler struct {
 	workerXORKey         string
 	appURL               string
 	streamSecret         string
-}
-
-func writeJSONUnescaped(c *gin.Context, status int, data interface{}) {
-	buf := &bytes.Buffer{}
-	encoder := json.NewEncoder(buf)
-	encoder.SetEscapeHTML(false)
-	encoder.Encode(data)
-	c.Data(status, "application/json; charset=utf-8", buf.Bytes())
 }
 
 func NewHandler(providers []provider.Provider, downloadWorkerURL, downloadWorkerSecret, workerXORKey, appURL, streamSecret string) *Handler {
@@ -72,12 +64,13 @@ func (h *Handler) Convert(c *gin.Context) {
 
 	result, err := h.service.SubmitAndWait(req.URL, req.From, req.To)
 	if err != nil {
-		response.ErrorWithCode(c, 400, "CONVERT_ERROR", err.Error())
+		log.Printf("[convert] submit error: %v", err)
+		response.ErrorWithCode(c, 400, "CONVERT_ERROR", "Conversion failed. Please check that the file format is supported and the URL is accessible.")
 		return
 	}
 
 	if result.Status == "error" {
-		response.ErrorWithCode(c, 500, "CONVERT_FAILED", result.Message)
+		response.ErrorWithCode(c, 500, "CONVERT_FAILED", "Conversion failed on the provider side. Please try again or use a different file.")
 		return
 	}
 
@@ -121,7 +114,7 @@ func (h *Handler) Convert(c *gin.Context) {
 		},
 	}
 
-	writeJSONUnescaped(c, http.StatusOK, res)
+	httputil.WriteJSONOK(c, res)
 }
 
 func (h *Handler) Status(c *gin.Context) {
@@ -176,19 +169,20 @@ func (h *Handler) Upload(c *gin.Context) {
 		return
 	}
 
-	if verr := convertvalidator.ValidateUpload(fileData, header.Size, convertvalidator.Audio); verr != nil {
+	if verr := convertvalidator.ValidateUpload(fileData, header.Size, convertvalidator.Image); verr != nil {
 		response.ErrorWithCode(c, 400, verr.Code, verr.Message)
 		return
 	}
 
 	result, err := h.service.SubmitAndWaitUpload(fileData, header.Filename, from, to)
 	if err != nil {
-		response.ErrorWithCode(c, 400, "CONVERT_ERROR", err.Error())
+		log.Printf("[convert] upload error: %v", err)
+		response.ErrorWithCode(c, 400, "CONVERT_ERROR", "Conversion failed. Please check that the file format is supported and try again.")
 		return
 	}
 
 	if result.Status == "error" {
-		response.ErrorWithCode(c, 500, "CONVERT_FAILED", result.Message)
+		response.ErrorWithCode(c, 500, "CONVERT_FAILED", "Conversion failed on the provider side. Please try again or use a different file.")
 		return
 	}
 
@@ -232,5 +226,5 @@ func (h *Handler) Upload(c *gin.Context) {
 		},
 	}
 
-	writeJSONUnescaped(c, http.StatusOK, res)
+	httputil.WriteJSONOK(c, res)
 }

@@ -157,6 +157,7 @@ func (s *Store) Init() error {
 		log.Printf("[iptv] load categories error: %v", err)
 	}
 	s.buildIndexes()
+	go s.startRefresh()
 
 	log.Printf("[iptv] loaded %d channels, %d streams, %d logos, %d countries, %d categories",
 		len(s.channels), len(s.streams), len(s.logos), len(s.countries), len(s.categories))
