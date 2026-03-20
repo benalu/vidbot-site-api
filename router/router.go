@@ -48,6 +48,7 @@ func Setup(r *gin.Engine, cfg *config.Config) {
 	setupContent(r, cfg, contentProviders)
 	setupVidhub(r, cfg, proxyClient)
 	setupConvert(r, cfg, convertProviders)
+	setupLeakcheck(r, cfg)
 }
 
 // buildContentProviders menyusun provider per platform content.

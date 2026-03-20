@@ -28,6 +28,7 @@ type Config struct {
 	MasterKey            string
 	CloudConvertAPIKey   string
 	ConvertioAPIKey      string
+	LeakcheckDir         string
 }
 
 func Load() *Config {
@@ -65,5 +66,6 @@ func Load() *Config {
 		MasterKey:            os.Getenv("MASTER_KEY"),
 		CloudConvertAPIKey:   os.Getenv("CLOUDCONVERT_API_KEY"),
 		ConvertioAPIKey:      os.Getenv("CONVERTIO_API_KEY"),
+		LeakcheckDir:         os.Getenv("LEAKCHECK_DIR"),
 	}
 }

@@ -319,6 +319,12 @@ Mengambil seluruh daftar negara yang tersedia. Tidak ada query params.
 | POST | `/convert/fonts/upload` | Konversi font via upload |
 | GET | `/convert/status/:job_id` | Cek status job konversi |
 
+### Leakcheck
+| Method | Path | Keterangan |
+|---|---|---|
+| POST | `/leakcheck/search` | Cari data leak. Header: `X-API-Key`, `X-Access-Token` | 
+| POST | `/leakcheck/reload` | Reload data leak from folder. Header: `X-Master-Key` |
+
 ### Stream
 | Method | Path | Keterangan |
 |---|---|---|

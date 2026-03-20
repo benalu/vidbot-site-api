@@ -9,6 +9,8 @@ tools/
 # test files
 test/
 
+data/
+
 # build output
 vidbot-site-api
 vidbot-site-api.exe
@@ -18,6 +20,11 @@ tmp/
 
 # Go
 vendor/
+
+# leakcheck
+internal/services/leakcheck/
+pkg/leakcheck/
+router/leakcheck.go
 
 generate_masterkey.py
 ecnrypt_worker.py
