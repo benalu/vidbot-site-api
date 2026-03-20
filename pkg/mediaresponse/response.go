@@ -58,11 +58,11 @@ type IPTVCategoriesResponse struct {
 type IPTVStream struct {
 	Title     string `json:"title,omitempty"`
 	URL       string `json:"url"`
+	Format    string `json:"format"`
 	Quality   string `json:"quality,omitempty"`
 	UserAgent string `json:"user_agent,omitempty"`
 	Referrer  string `json:"referrer,omitempty"`
 }
-
 type IPTVChannel struct {
 	ID         string       `json:"id"`
 	Name       string       `json:"name"`
