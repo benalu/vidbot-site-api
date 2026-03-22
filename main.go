@@ -12,6 +12,7 @@ import (
 	"vidbot-api/pkg/cache"
 	"vidbot-api/pkg/downloader"
 	"vidbot-api/pkg/leakcheck"
+	"vidbot-api/pkg/stats"
 	"vidbot-api/router"
 
 	"github.com/gin-gonic/gin"
@@ -32,6 +33,10 @@ func main() {
 		log.Printf("[leakcheck] init error: %v", err)
 	}
 
+	if err := stats.Init("data/stats/stats.db"); err != nil {
+		log.Printf("[stats] init error: %v", err)
+	}
+
 	r := gin.Default()
 	router.Setup(r, cfg)
 
@@ -40,7 +45,6 @@ func main() {
 		Handler: r,
 	}
 
-	// jalankan server di goroutine terpisah
 	go func() {
 		log.Printf("Server running on port %s", cfg.AppPort)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -48,14 +52,12 @@ func main() {
 		}
 	}()
 
-	// tunggu sinyal SIGINT atau SIGTERM
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
 	log.Println("Shutting down server...")
 
-	// beri waktu 30 detik untuk request yang sedang berjalan selesai
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 

@@ -12,7 +12,7 @@ var endpointLimits = map[string]int{
 	"convert":   20,
 	"vidhub":    30,
 	"iptv":      60,
-	"leakcheck": 30,
+	"leakcheck": 5,
 }
 
 func CheckRateLimit(keyHash, group string) (bool, error) {
@@ -26,11 +26,9 @@ func CheckRateLimit(keyHash, group string) (bool, error) {
 
 	count, err := cache.Incr(ctx, redisKey)
 	if err != nil {
-		// kalau Redis error, loloskan saja
 		return true, nil
 	}
 
-	// set TTL hanya saat pertama kali (count == 1)
 	if count == 1 {
 		cache.Expire(ctx, redisKey, 60*time.Second)
 	}
