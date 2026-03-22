@@ -43,12 +43,13 @@ func setupContent(r *gin.Engine, cfg *config.Config, providers contentProviderSe
 		middleware.RequireAPIKey(),
 		middleware.RequireAccessToken(cfg.MagicString),
 		middleware.RateLimit("content"),
+		middleware.FeatureFlag("content"),
 	)
 	{
-		group.POST("/spotify", spotifyHandler.Extract)
-		group.POST("/tiktok", tiktokHandler.Extract)
-		group.POST("/instagram", instagramHandler.Extract)
-		group.POST("/twitter", twitterHandler.Extract)
-		group.POST("/threads", threadsHandler.Extract)
+		group.POST("/spotify", middleware.FeatureFlagPlatform("content", "spotify"), spotifyHandler.Extract)
+		group.POST("/tiktok", middleware.FeatureFlagPlatform("content", "tiktok"), tiktokHandler.Extract)
+		group.POST("/instagram", middleware.FeatureFlagPlatform("content", "instagram"), instagramHandler.Extract)
+		group.POST("/twitter", middleware.FeatureFlagPlatform("content", "twitter"), twitterHandler.Extract)
+		group.POST("/threads", middleware.FeatureFlagPlatform("content", "threads"), threadsHandler.Extract)
 	}
 }

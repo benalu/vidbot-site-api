@@ -16,6 +16,7 @@ func setupIPTV(r *gin.Engine, cfg *config.Config) {
 		middleware.RequireAPIKey(),
 		middleware.RequireAccessToken(cfg.MagicString),
 		middleware.RateLimit("iptv"),
+		middleware.FeatureFlag("iptv"),
 	)
 	{
 		group.GET("/channels", iptvHandler.GetChannels)
@@ -24,6 +25,6 @@ func setupIPTV(r *gin.Engine, cfg *config.Config) {
 	}
 
 	// route playlist — API key via query param, langsung bisa di VLC/Tivimate
-	r.GET("/iptv/playlist", middleware.RequireAPIKeyFromQuery(), middleware.RateLimit("iptv"), iptvHandler.GetPlaylist)
+	r.GET("/iptv/playlist", middleware.RequireAPIKeyFromQuery(), middleware.RateLimit("iptv"), middleware.FeatureFlag("iptv"), iptvHandler.GetPlaylist)
 
 }

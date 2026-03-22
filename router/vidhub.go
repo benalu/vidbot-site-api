@@ -44,12 +44,13 @@ func setupVidhub(r *gin.Engine, cfg *config.Config, proxyClient *proxy.Client) {
 		middleware.RequireAPIKey(),
 		middleware.RequireAccessToken(cfg.MagicString),
 		middleware.RateLimit("vidhub"),
+		middleware.FeatureFlag("vidhub"),
 	)
 	{
-		group.POST("/videb", videbHandler.Extract)
-		group.POST("/vidoy", vidoyHandler.Extract)
-		group.POST("/vidbos", vidbosHandler.Extract)
-		group.POST("/vidarato", vidaratoHandler.Extract)
-		group.POST("/vidnest", vidnestHandler.Extract)
+		group.POST("/videb", middleware.FeatureFlagPlatform("vidhub", "videb"), videbHandler.Extract)
+		group.POST("/vidoy", middleware.FeatureFlagPlatform("vidhub", "vidoy"), vidoyHandler.Extract)
+		group.POST("/vidbos", middleware.FeatureFlagPlatform("vidhub", "vidbos"), vidbosHandler.Extract)
+		group.POST("/vidarato", middleware.FeatureFlagPlatform("vidhub", "vidarato"), vidaratoHandler.Extract)
+		group.POST("/vidnest", middleware.FeatureFlagPlatform("vidhub", "vidnest"), vidnestHandler.Extract)
 	}
 }

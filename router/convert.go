@@ -38,16 +38,17 @@ func setupConvert(r *gin.Engine, cfg *config.Config, providers []convertprovider
 		middleware.RequireAPIKey(),
 		middleware.RequireAccessToken(cfg.MagicString),
 		middleware.RateLimit("convert"),
+		middleware.FeatureFlag("convert"),
 	)
 	{
-		group.POST("/audio", audioHandler.Convert)
-		group.POST("/audio/upload", audioHandler.Upload)
-		group.POST("/document", docHandler.Convert)
-		group.POST("/document/upload", docHandler.Upload)
-		group.POST("/image", imgHandler.Convert)
-		group.POST("/image/upload", imgHandler.Upload)
-		group.POST("/fonts", fontsHandler.Convert)
-		group.POST("/fonts/upload", fontsHandler.Upload)
+		group.POST("/audio", middleware.FeatureFlagPlatform("convert", "audio"), audioHandler.Convert)
+		group.POST("/audio/upload", middleware.FeatureFlagPlatform("convert", "audio"), audioHandler.Upload)
+		group.POST("/document", middleware.FeatureFlagPlatform("convert", "document"), docHandler.Convert)
+		group.POST("/document/upload", middleware.FeatureFlagPlatform("convert", "document"), docHandler.Upload)
+		group.POST("/image", middleware.FeatureFlagPlatform("convert", "image"), imgHandler.Convert)
+		group.POST("/image/upload", middleware.FeatureFlagPlatform("convert", "image"), imgHandler.Upload)
+		group.POST("/fonts", middleware.FeatureFlagPlatform("convert", "fonts"), fontsHandler.Convert)
+		group.POST("/fonts/upload", middleware.FeatureFlagPlatform("convert", "fonts"), fontsHandler.Upload)
 		group.GET("/status/:job_id", audioHandler.Status)
 	}
 }
