@@ -5,6 +5,10 @@
 
 ---
 
+## Build Binary
+GOOS=linux GOARCH=amd64 go build -o vidbot-api main.go
+
+
 ## Stack
 
 | Komponen | Teknologi |
@@ -590,6 +594,7 @@ File yang perlu disentuh — tidak ada file lain:
 | 4 | Goroutine secondary di content service tidak ada context cancellation | `internal/services/content/*/service.go` | 🟡 Low priority |
 
 ---
+
 
 ## Pending / Backlog
 

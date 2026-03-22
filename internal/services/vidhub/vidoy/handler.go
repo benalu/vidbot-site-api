@@ -7,6 +7,7 @@ import (
 	"vidbot-api/pkg/mediaresponse"
 	"vidbot-api/pkg/proxy"
 	"vidbot-api/pkg/response"
+	"vidbot-api/pkg/stats"
 	"vidbot-api/pkg/validator"
 
 	"github.com/gin-gonic/gin"
@@ -33,6 +34,7 @@ func NewHandler(proxyClient *proxy.Client, downloadWorkerURL, downloadWorkerSecr
 }
 
 func (h *Handler) Extract(c *gin.Context) {
+	stats.Platform(c, "vidhub", "vidoy")
 	var req Request
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Error(c, 400, "url is required")

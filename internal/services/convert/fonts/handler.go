@@ -11,6 +11,7 @@ import (
 	"vidbot-api/pkg/httputil"
 	"vidbot-api/pkg/mediaresponse"
 	"vidbot-api/pkg/response"
+	"vidbot-api/pkg/stats"
 	"vidbot-api/pkg/validator"
 
 	"github.com/gin-gonic/gin"
@@ -43,6 +44,7 @@ type ConvertRequest struct {
 }
 
 func (h *Handler) Convert(c *gin.Context) {
+	stats.Platform(c, "convert", "fonts")
 	var req ConvertRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.ErrorWithCode(c, 400, "BAD_REQUEST", "url, from, and to are required.")
@@ -118,6 +120,7 @@ func (h *Handler) Convert(c *gin.Context) {
 }
 
 func (h *Handler) Upload(c *gin.Context) {
+	stats.Platform(c, "convert", "fonts")
 	if err := c.Request.ParseMultipartForm(50 << 20); err != nil {
 		response.ErrorWithCode(c, 400, "BAD_REQUEST", "Failed to parse form data.")
 		return

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"vidbot-api/pkg/iptvstore"
 	"vidbot-api/pkg/mediaresponse"
+	"vidbot-api/pkg/stats"
 
 	"github.com/gin-gonic/gin"
 )
@@ -20,6 +21,7 @@ func NewHandler() *Handler {
 }
 
 func (h *Handler) GetChannels(c *gin.Context) {
+	stats.Group(c, "iptv")
 	country := c.Query("country")
 	category := c.Query("category")
 	streamsOnly := c.Query("streams_only") == "true"
@@ -168,6 +170,7 @@ func (h *Handler) GetCategories(c *gin.Context) {
 // GetPlaylist — endpoint untuk player seperti VLC dan Tivimate.
 // Auth via query param ?key= karena player tidak bisa kirim custom header.
 func (h *Handler) GetPlaylist(c *gin.Context) {
+	stats.Group(c, "iptv")
 	country := c.Query("country")
 	category := c.Query("category")
 	h.renderPlaylist(c, country, category)
