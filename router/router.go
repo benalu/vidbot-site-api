@@ -9,6 +9,7 @@ import (
 	convertprovider "vidbot-api/internal/services/convert/provider"
 	ccprovider "vidbot-api/internal/services/convert/provider/cloudconvert"
 	convertioprovider "vidbot-api/internal/services/convert/provider/convertio"
+
 	"vidbot-api/internal/stream"
 	"vidbot-api/pkg/iptvstore"
 	"vidbot-api/pkg/proxy"
@@ -23,7 +24,9 @@ func Setup(r *gin.Engine, cfg *config.Config) {
 
 	// IPTV store
 	if err := iptvstore.Default.Init(); err != nil {
-		log.Printf("[iptv] init error: %v", err)
+		log.Printf("[iptv] WARNING: init failed, all /iptv/* endpoints will return empty data: %v", err)
+	} else {
+		log.Println("[iptv] store initialized successfully")
 	}
 
 	// content providers
@@ -42,6 +45,7 @@ func Setup(r *gin.Engine, cfg *config.Config) {
 	})
 
 	// sub-router per grup
+	setupHealth(r, cfg)
 	setupAuth(r, cfg)
 	setupAdmin(r, cfg)
 	setupIPTV(r, cfg)

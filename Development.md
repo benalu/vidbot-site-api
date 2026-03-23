@@ -5,9 +5,24 @@
 
 ---
 
-## Build Binary
+## Build & Deploy
+
+```bash
+# build untuk Linux VPS
 GOOS=linux GOARCH=amd64 go build -o vidbot-api main.go
 
+# deploy ke VPS
+# 1. upload binary via WinSCP (replace yang lama)
+# 2. restart service
+sudo systemctl restart vidbot-api-go
+
+# monitoring
+tail -f /home/ubuntu/vidbot-api-go/logs/out.log
+tail -f /home/ubuntu/vidbot-api-go/logs/error.log
+sudo systemctl status vidbot-api-go
+```
+
+---
 
 ## Stack
 
@@ -15,10 +30,11 @@ GOOS=linux GOARCH=amd64 go build -o vidbot-api main.go
 |---|---|
 | Language | Go (gin-gonic) |
 | Cache / State | Redis (Upstash) |
+| Stats Tracking | SQLite (lokal, `data/stats/stats.db`) |
 | Proxy Layer | Cloudflare Workers |
 | Auth | Time-based HMAC token + API Key |
 | File Conversion | CloudConvert, Convertio |
-| Media Extraction | Downr (via CF Worker) |
+| Media Extraction | Downr + Vidown (via CF Worker) |
 
 ---
 
@@ -80,10 +96,13 @@ go mod tidy
 # seed Redis (wajib dijalankan sekali sebelum pertama kali atau setelah reset Redis)
 go run cmd/seed/main.go
 
+# buat folder data (wajib ada sebelum pertama kali)
+mkdir -p data/stats
+
 # jalankan server
 go run main.go
 
-# build
+# build lokal
 go build -o vidbot-api main.go
 ```
 
@@ -99,6 +118,11 @@ vidbot-site-api/
 ├─ config/
 │  ├─ allowed_domains.json
 │  └─ config.go
+├─ data/                          ← tidak masuk git (.gitignore)
+│  ├─ leakcheck/
+│  │  └─ leakcheck.db
+│  └─ stats/
+│     └─ stats.db                 ← stats tracking SQLite
 ├─ internal/
 │  ├─ admin/
 │  │  └─ handler.go
@@ -150,6 +174,8 @@ vidbot-site-api/
 │  │  │     └─ provider.go
 │  │  ├─ iptv/
 │  │  │  └─ handler.go
+│  │  ├─ leakcheck/
+│  │  │  └─ handler.go
 │  │  └─ vidhub/
 │  │     ├─ vidarato/
 │  │     │  ├─ handler.go
@@ -172,6 +198,7 @@ vidbot-site-api/
 ├─ middleware/
 │  ├─ api_key.go
 │  ├─ auth.go
+│  ├─ feature.go                  ← feature flag middleware (baru)
 │  └─ ratelimit.go
 ├─ pkg/
 │  ├─ apikey/
@@ -187,10 +214,12 @@ vidbot-site-api/
 │  │  ├─ detector.go
 │  │  └─ download_url.go
 │  ├─ fileutil/
-│  │  └─ filename.go          ← sanitize filename unified (baru)
+│  │  └─ filename.go              ← sanitize filename unified
 │  ├─ httputil/
-│  │  └─ json.go              ← writeJSONUnescaped unified (baru)
+│  │  └─ json.go                  ← writeJSONUnescaped unified
 │  ├─ iptvstore/
+│  │  └─ store.go
+│  ├─ leakcheck/
 │  │  └─ store.go
 │  ├─ limiter/
 │  │  ├─ global.go
@@ -204,15 +233,20 @@ vidbot-site-api/
 │  │  └─ ua.go
 │  ├─ response/
 │  │  └─ response.go
+│  ├─ stats/
+│  │  ├─ db.go                    ← SQLite init + query (baru)
+│  │  └─ tracker.go               ← helper tracking per handler (baru)
 │  └─ validator/
 │     └─ url.go
 ├─ router/
-│  ├─ router.go               ← orchestrate only, panggil sub-router
-│  ├─ auth.go                 ← route /auth + /admin (baru)
-│  ├─ content.go              ← route /content/* (baru)
-│  ├─ convert.go              ← route /convert/* (baru)
-│  ├─ iptv.go                 ← route /iptv/* (baru)
-│  └─ vidhub.go               ← route /vidhub/* (baru)
+│  ├─ router.go                   ← orchestrate only, panggil sub-router
+│  ├─ admin.go                    ← route /admin/* (baru)
+│  ├─ auth.go                     ← route /auth/*
+│  ├─ content.go                  ← route /content/*
+│  ├─ convert.go                  ← route /convert/*
+│  ├─ iptv.go                     ← route /iptv/*
+│  ├─ leakcheck.go                ← route /leakcheck/*
+│  └─ vidhub.go                   ← route /vidhub/*
 ├─ test/
 │  ├─ TestNih.jpg
 │  └─ TestNih.txt
@@ -238,59 +272,54 @@ vidbot-site-api/
 ### Auth
 | Method | Path | Keterangan |
 |---|---|---|
-| GET | `/auth/verify` | Verifikasi API key + access token |
+| GET | `/auth/verify` | Verifikasi API key + dapat access token |
 | GET | `/auth/quota` | Cek sisa quota API key |
 
-### Admin (gunakan Master Key)
+### Admin (gunakan Master Key via `X-Master-Key`)
 | Method | Path | Keterangan |
 |---|---|---|
 | POST | `/admin/keys` | Buat API key baru |
-| DELETE | `/admin/keys/:key` | Hapus API key |
-| GET | `/admin/keys` | List semua API key |
+| DELETE | `/admin/keys/:key` | Revoke API key |
+| GET | `/admin/keys` | List semua API key (`?active=true/false`) |
 | POST | `/admin/keys/:key/topup` | Top-up quota |
+| GET | `/admin/keys/:key/usage` | Usage detail per API key |
+| GET | `/admin/features` | Status semua feature flag |
+| GET | `/admin/features/:group/enable` | Nyalakan group |
+| GET | `/admin/features/:group/disable` | Matikan group |
+| GET | `/admin/features/:group/:platform/enable` | Nyalakan platform |
+| GET | `/admin/features/:group/:platform/disable` | Matikan platform |
+| GET | `/admin/stats` | Statistik usage seluruh API |
 
 ### IPTV (butuh API Key + Access Token)
 
 #### `GET /iptv/channels`
-Mengambil daftar channel. Semua query params opsional.
-
 | Query Param | Tipe | Default | Keterangan |
 |---|---|---|---|
-| `country` | string | — | Filter by kode negara (contoh: `ID`, `US`). Harus valid dari `/iptv/countries` |
-| `category` | string | — | Filter by kategori (contoh: `news`, `sports`). Harus valid dari `/iptv/categories` |
-| `streams_only` | bool | `false` | Kalau `true`, hanya tampilkan channel yang punya stream aktif |
-| `page` | integer | — | Nomor halaman. Jika diisi, pagination aktif |
-| `limit` | integer | `50` | Jumlah item per halaman. Min 1, max 100. Hanya aktif jika `page` diisi |
-
-> Jika `page` dan `limit` tidak diisi, semua channel dikembalikan sekaligus tanpa pagination.
-
-**Contoh request:**
-```
-GET /iptv/channels?country=ID&streams_only=true&page=1&limit=20
-```
-
-**Contoh response dengan pagination:**
-```json
-{
-  "success": true,
-  "services": "iptv",
-  "country": "ID",
-  "category": "",
-  "total": 120,
-  "data": [...]
-  "page": 1,
-  "limit": 20,
-  "total_pages": 6,
-}
-```
-
----
+| `country` | string | — | Filter by kode negara (contoh: `ID`) |
+| `category` | string | — | Filter by kategori (contoh: `news`) |
+| `streams_only` | bool | `false` | Hanya channel yang punya stream aktif |
+| `page` | integer | — | Nomor halaman — aktifkan pagination |
+| `limit` | integer | `50` | Item per halaman, max 100 |
 
 #### `GET /iptv/categories`
-Mengambil seluruh daftar kategori yang tersedia. Tidak ada query params.
+Daftar kategori. Tidak ada query params.
 
 #### `GET /iptv/countries`
-Mengambil seluruh daftar negara yang tersedia. Tidak ada query params.
+Daftar negara. Tidak ada query params.
+
+#### `GET /iptv/playlist`
+Generate file M3U untuk VLC/Tivimate. Auth via `?key=` bukan header.
+
+| Query Param | Keterangan |
+|---|---|
+| `key` | API Key (wajib) |
+| `country` | Filter negara (opsional) |
+| `category` | Filter kategori (opsional) |
+
+Contoh URL langsung di VLC:
+```
+https://your-domain.com/iptv/playlist?country=ID&key=YOUR_API_KEY
+```
 
 ### Content (butuh API Key + Access Token)
 | Method | Path | Keterangan |
@@ -323,16 +352,86 @@ Mengambil seluruh daftar negara yang tersedia. Tidak ada query params.
 | POST | `/convert/fonts/upload` | Konversi font via upload |
 | GET | `/convert/status/:job_id` | Cek status job konversi |
 
-### Leakcheck
-| Method | Path | Keterangan |
-|---|---|---|
-| POST | `/leakcheck/search` | Cari data leak. Header: `X-API-Key`, `X-Access-Token` | 
-| POST | `/leakcheck/reload` | Reload data leak from folder. Header: `X-Master-Key` |
-
 ### Stream
 | Method | Path | Keterangan |
 |---|---|---|
 | GET | `/dl` | Proxy download stream |
+
+---
+
+## Feature Flags
+
+Feature flag memungkinkan enable/disable endpoint tanpa redeploy.
+Status disimpan di Redis — efektif langsung tanpa restart server.
+
+### Group Level
+```
+GET /admin/features/iptv/disable     → matikan semua /iptv/*
+GET /admin/features/content/enable   → nyalakan semua /content/*
+```
+
+### Platform Level
+```
+GET /admin/features/content/tiktok/disable   → matikan hanya /content/tiktok
+GET /admin/features/vidhub/videb/disable     → matikan hanya /vidhub/videb
+GET /admin/features/convert/audio/disable    → matikan hanya /convert/audio
+```
+
+### Group yang tersedia
+| Group | Platform |
+|---|---|
+| `content` | `spotify`, `tiktok`, `instagram`, `twitter`, `threads` |
+| `vidhub` | `videb`, `vidoy`, `vidbos`, `vidarato`, `vidnest` |
+| `convert` | `audio`, `document`, `image`, `fonts` |
+| `iptv` | — (group level only) |
+| `leakcheck` | — (group level only) |
+
+---
+
+## Stats Tracking
+
+Stats disimpan di SQLite (`data/stats/stats.db`) — tidak di Redis.
+Setiap request yang lolos rate limit akan di-track via `stats.Platform()` atau `stats.Group()` di handler.
+
+### Cara Pakai di Handler Baru
+```go
+import "vidbot-api/pkg/stats"
+
+func (h *Handler) Extract(c *gin.Context) {
+    stats.Platform(c, "content", "tiktok") // ← baris pertama
+    // ... sisa kode
+}
+
+// untuk group tanpa platform (iptv, leakcheck)
+stats.Group(c, "iptv")
+```
+
+### Response `GET /admin/stats`
+```json
+{
+  "success": true,
+  "data": {
+    "total_keys": 10,
+    "active_keys": 8,
+    "total_requests": 1240,
+    "today_requests": 45,
+    "unique_keys": 6,
+    "usage": {
+      "content": {
+        "platforms": {
+          "tiktok": 500,
+          "instagram": 300,
+          "spotify": 200,
+          "twitter": 100,
+          "threads": 50
+        }
+      },
+      "iptv": 80,
+      "leakcheck": 10
+    }
+  }
+}
+```
 
 ---
 
@@ -384,6 +483,8 @@ RPUSH content:provider:tiktok provider_baru downr
 | `ratelimit:{keyHash}:{group}` | Integer (TTL 60s) | Rate limit counter per group |
 | `content:{site}:{urlHash}` | String (JSON) | Cache response content |
 | `vidhub:{site}:{urlHash}` | String (JSON) | Cache response vidhub |
+| `feature:{group}` | String | Status on/off per group |
+| `feature:{group}:{platform}` | String | Status on/off per platform |
 
 ---
 
@@ -397,6 +498,8 @@ Rate limit diterapkan per endpoint group via middleware `RateLimit`:
 | `/convert/*` | 20 req/menit per API key |
 | `/vidhub/*` | 30 req/menit per API key |
 | `/iptv/*` | 60 req/menit per API key |
+| `/leakcheck/*` | 5 req/menit per API key |
+| `/iptv/playlist` | 60 req/menit per API key |
 
 Untuk mengubah limit, edit `endpointLimits` di `pkg/limiter/ratelimit.go`.
 
@@ -430,11 +533,13 @@ memanggil sub-router. Tidak ada route yang didefinisikan langsung di sini.
 | File | Tanggung Jawab |
 |---|---|
 | `router/router.go` | Inisialisasi providers, proxy client, panggil sub-router |
-| `router/auth.go` | Route `/auth/*` dan `/admin/*` |
-| `router/content.go` | Route `/content/*` dan inisialisasi content handler |
-| `router/vidhub.go` | Route `/vidhub/*` dan inisialisasi vidhub handler |
-| `router/convert.go` | Route `/convert/*` dan inisialisasi convert handler |
-| `router/iptv.go` | Route `/iptv/*` dan inisialisasi iptv handler |
+| `router/admin.go` | Route `/admin/*` |
+| `router/auth.go` | Route `/auth/*` |
+| `router/content.go` | Route `/content/*` |
+| `router/vidhub.go` | Route `/vidhub/*` |
+| `router/convert.go` | Route `/convert/*` |
+| `router/iptv.go` | Route `/iptv/*` dan `/iptv/playlist` |
+| `router/leakcheck.go` | Route `/leakcheck/*` |
 
 **Aturan:** kalau menambah platform atau provider baru, `router/router.go` dan
 `main.go` **tidak perlu disentuh** — cukup file sub-router yang relevan.
@@ -443,28 +548,29 @@ memanggil sub-router. Tidak ada route yang didefinisikan langsung di sini.
 
 ## Shared Utilities
 
-Dua package di `pkg/` yang wajib dipakai di semua handler dan service baru:
-
 ### `pkg/httputil` — JSON Response
 ```go
 import "vidbot-api/pkg/httputil"
 
-// di handler, ganti c.JSON() atau writeJSONUnescaped() dengan:
-httputil.WriteJSONOK(c, res)          // status 200
+httputil.WriteJSONOK(c, res)              // status 200
 httputil.WriteJSON(c, http.StatusOK, res) // status custom
 ```
-Mencegah `\u0026` pada URL di dalam response JSON. Semua handler wajib
-menggunakan ini, bukan `c.JSON()` langsung untuk response yang mengandung URL.
+Mencegah `\u0026` pada URL di dalam response JSON.
 
 ### `pkg/fileutil` — Sanitize Filename
 ```go
 import "vidbot-api/pkg/fileutil"
 
-// untuk nama file tanpa ekstensi (vidhub/content service)
 filename := fileutil.Sanitize(title) + ".mp4"
-
-// untuk nama file dengan ekstensi (stream handler)
 filename := fileutil.SanitizeWithExt(rawName, ext)
+```
+
+### `pkg/stats` — Stats Tracking
+```go
+import "vidbot-api/pkg/stats"
+
+stats.Platform(c, "content", "tiktok") // untuk endpoint dengan platform
+stats.Group(c, "iptv")                 // untuk endpoint tanpa platform
 ```
 
 ---
@@ -473,25 +579,29 @@ filename := fileutil.SanitizeWithExt(rawName, ext)
 
 ### Menambah platform content baru (misal: YouTube)
 
-File yang perlu disentuh — tidak ada file lain:
-
 ```
 1. Buat folder baru:
    internal/services/content/youtube/
    ├─ handler.go   ← ikuti pola spotify/handler.go
-   └─ service.go   ← ikuti pola spotify/service.go
+   └─ service.go
 
 2. pkg/downloader/cache.go
    → tambah entry TTL di cacheTTL map
 
 3. router/content.go
-   → tambah provider slice, handler, dan route
+   → tambah provider slice, handler, route, dan FeatureFlagPlatform
 
 4. cmd/seed/main.go
    → tambah allowed_domains + content:provider key
 
 5. config/allowed_domains.json
    → tambah domain list
+
+6. internal/admin/handler.go
+   → tambah "youtube" ke validPlatforms["content"]
+
+7. Di handler baru, tambah di baris pertama Extract():
+   stats.Platform(c, "content", "youtube")
 ```
 
 ### Menambah provider content baru (misal: Cobalt)
@@ -520,19 +630,25 @@ File yang perlu disentuh — tidak ada file lain:
    → tambah entry TTL di cacheTTL map
 
 3. router/vidhub.go
-   → tambah handler dan route
+   → tambah handler, route, dan FeatureFlagPlatform
 
 4. cmd/seed/main.go
    → tambah allowed_domains key
 
 5. config/allowed_domains.json
    → tambah domain list
+
+6. internal/admin/handler.go
+   → tambah "vidplay" ke validPlatforms["vidhub"]
+
+7. Di handler baru, tambah di baris pertama Extract():
+   stats.Platform(c, "vidhub", "vidplay")
 ```
 
 ### Menambah format convert baru
 
 ```
-1. Tambah di allowedFormats map di service.go kategori yang relevan
+1. Tambah di allowedFormats di service.go kategori yang relevan
 2. Tambah di formatCompatibility map
 3. Tambah content type di pkg/convertvalidator/validator.go
 4. Tambah di supportedFormats di cloudconvert.go dan convertio.go
@@ -555,9 +671,9 @@ File yang perlu disentuh — tidak ada file lain:
 
 | Skenario | File yang disentuh |
 |---|---|
-| Platform content baru | `content/{nama}/` + `cache.go` + `router/content.go` + `seed` + `allowed_domains.json` |
+| Platform content baru | `content/{nama}/` + `cache.go` + `router/content.go` + `seed` + `allowed_domains.json` + `admin/handler.go` |
 | Provider content baru | `content/provider/{nama}/` + `router/content.go` + `seed` |
-| Platform vidhub baru | `vidhub/{nama}/` + `cache.go` + `router/vidhub.go` + `seed` + `allowed_domains.json` |
+| Platform vidhub baru | `vidhub/{nama}/` + `cache.go` + `router/vidhub.go` + `seed` + `allowed_domains.json` + `admin/handler.go` |
 | Format convert baru | `service.go` + `validator.go` + `cloudconvert.go` + `convertio.go` |
 | Provider convert baru | `convert/provider/{nama}/` + `router/convert.go` |
 
@@ -565,6 +681,7 @@ File yang perlu disentuh — tidak ada file lain:
 - Selalu gunakan `httputil.WriteJSONOK` — jangan `c.JSON()` untuk response yang mengandung URL
 - Error response selalu via `response.ErrorWithCode(c, status, "CODE", "message")`
 - Cache selalu disimpan **tanpa** `server_1` dan `server_2`
+- Tambah `stats.Platform()` atau `stats.Group()` di baris pertama setiap handler baru
 
 ---
 
@@ -590,26 +707,30 @@ File yang perlu disentuh — tidak ada file lain:
 |---|---|---|---|
 | 1 | `/convert/image/upload` validasi pakai `Audio` bukan `Image` | `internal/services/convert/image/handler.go` | ✅ Fixed |
 | 2 | `content:threads` tidak ada di `cacheTTL`, fallback ke 15 menit | `pkg/downloader/cache.go` | ✅ Fixed |
-| 3 | `iptvstore.startRefresh()` tidak dipanggil di `Init()` — data IPTV tidak auto-refresh | `pkg/iptvstore/store.go` | 🔴 Open |
+| 3 | `iptvstore.startRefresh()` tidak dipanggil di `Init()` | `pkg/iptvstore/store.go` | ✅ Fixed |
 | 4 | Goroutine secondary di content service tidak ada context cancellation | `internal/services/content/*/service.go` | 🟡 Low priority |
 
 ---
 
-
 ## Pending / Backlog
 
-- [ ] Health check endpoint (`GET /health`)
-- [ ] Graceful shutdown
+- [ ] Health check endpoint (`GET /health`) ✅ Selesai
 - [ ] Structured logging ke file
 - [ ] Tier sistem (free, pro, enterprise) untuk rate limit + quota berbeda
 - [ ] Fix ID dan Duration kosong di response TikTok
 - [ ] CF Worker: tambah Referer header untuk Convertio URLs (server_1 masih 403)
 - [ ] Cache hasil convert untuk hemat credits CloudConvert/Convertio
 - [ ] Dokumentasi API publik (Postman collection atau README terpisah)
-- [ ] Fix `iptvstore.startRefresh()` tidak dipanggil (lihat Known Bugs #3)
+- [ ] Provider priority pindah ke memory (kurangi hit Redis)
+- [ ] URL versioning `/v1/`
 - [ ] Konsolidasi `writeJSONUnescaped` ke `pkg/httputil` ✅ Selesai
 - [ ] Konsolidasi `sanitizeFilename` ke `pkg/fileutil` ✅ Selesai
 - [ ] Pecah `router/router.go` ke sub-router per grup ✅ Selesai
+- [ ] Graceful shutdown ✅ Selesai
+- [ ] Feature flag per group dan platform ✅ Selesai
+- [ ] Stats tracking per platform via SQLite ✅ Selesai
+- [ ] IPTV playlist endpoint (`GET /iptv/playlist`) ✅ Selesai
+- [ ] IPTV stream format detection (`format` field) ✅ Selesai
 
 ---
 
@@ -623,5 +744,10 @@ File yang perlu disentuh — tidak ada file lain:
 | Hex encoding untuk download URL | Karakter aman, tidak ada padding atau karakter spesial |
 | `httputil.WriteJSONOK` | Mencegah `\u0026` di URL dalam response JSON, satu implementasi untuk semua handler |
 | `fileutil.Sanitize` | Satu implementasi sanitize filename, mencegah perbedaan behavior antar service |
-| Sub-router per grup | `router/router.go` tidak perlu disentuh saat tambah platform baru, tiap grup bisa dibaca independen |
+| Sub-router per grup | `router/router.go` tidak perlu disentuh saat tambah platform baru |
 | Rate limit per group via Redis | Bisa diubah tanpa redeploy, state tersimpan across instance |
+| Stats tracking via SQLite | Mengurangi hit Redis, data permanen tidak hilang saat Redis di-flush |
+| Feature flag via Redis | Real-time toggle tanpa restart server |
+| SMIL URL tidak di-resolve ke chunklist | Chunklist berisi token dinamis yang expire — VLC fetch sendiri dengan header yang benar |
+| Graceful shutdown 30 detik | HLS download bisa makan waktu lama, tidak boleh terputus paksa |
+| IPTV playlist auth via `?key=` | Player seperti VLC tidak bisa kirim custom header |
