@@ -64,3 +64,6 @@ func Del(ctx context.Context, keys ...string) error {
 func RPush(ctx context.Context, key string, values ...interface{}) error {
 	return client.RPush(ctx, key, values...).Err()
 }
+func Ping(ctx context.Context) error {
+	return client.Ping(ctx).Err()
+}

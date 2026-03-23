@@ -2,8 +2,8 @@ package stats
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
-	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -53,10 +53,12 @@ func Track(group, platform, keyHash string) {
 	if DB == nil {
 		return
 	}
-	DB.Exec(
+	if _, err := DB.Exec(
 		`INSERT INTO stats (grp, platform, key_hash) VALUES (?, ?, ?)`,
 		group, platform, keyHash,
-	)
+	); err != nil {
+		log.Printf("[stats] track error: %v", err)
+	}
 }
 
 func GetGroupStats(group string) (totalRequests int, uniqueKeys int) {
@@ -121,6 +123,6 @@ func Cleanup(days int) {
 	}
 	DB.Exec(
 		`DELETE FROM stats WHERE created_at < datetime('now', ?)`,
-		-days*int(time.Hour)*24,
+		fmt.Sprintf("-%d days", days),
 	)
 }
