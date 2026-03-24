@@ -204,7 +204,8 @@ vidbot-site-api/
 │  ├─ apikey/
 │  │  └─ types.go
 │  ├─ cache/
-│  │  └─ cache.go
+│  │  ├─ cache.go
+│  │  └─ provider_cache.go        ← in-memory provider priority cache (baru)
 │  ├─ cloudconvert/
 │  │  └─ client.go
 │  ├─ convertvalidator/
@@ -234,8 +235,8 @@ vidbot-site-api/
 │  ├─ response/
 │  │  └─ response.go
 │  ├─ stats/
-│  │  ├─ db.go                    ← SQLite init + query (baru)
-│  │  └─ tracker.go               ← helper tracking per handler (baru)
+│  │  ├─ db.go                    ← SQLite init + query
+│  │  └─ tracker.go               ← async write via buffered channel
 │  └─ validator/
 │     └─ url.go
 ├─ router/
@@ -532,7 +533,7 @@ memanggil sub-router. Tidak ada route yang didefinisikan langsung di sini.
 
 | File | Tanggung Jawab |
 |---|---|
-| `router/router.go` | Inisialisasi providers, proxy client, panggil sub-router |
+| `router/router.go` | Inisialisasi providers, proxy client, provider cache, panggil sub-router |
 | `router/admin.go` | Route `/admin/*` |
 | `router/auth.go` | Route `/auth/*` |
 | `router/content.go` | Route `/content/*` |
@@ -564,6 +565,19 @@ import "vidbot-api/pkg/fileutil"
 filename := fileutil.Sanitize(title) + ".mp4"
 filename := fileutil.SanitizeWithExt(rawName, ext)
 ```
+
+### `pkg/cache/provider_cache` — Provider Priority Cache
+```go
+// Inisialisasi di router/router.go — otomatis sync dari Redis setiap 5 menit
+cache.InitProviderCache([]string{
+    "content:provider:tiktok",
+    // ...
+})
+
+// Tidak perlu dipanggil manual di tempat lain
+// ResolveProviderForCategory sudah pakai GetProviderOrder() secara otomatis
+```
+Provider priority dibaca dari memory, bukan Redis, sehingga tidak ada round-trip Redis per request. Kalau urutan provider diubah di Redis (via `DEL` + `RPUSH`), perubahan akan aktif dalam maksimal 5 menit tanpa restart server.
 
 ### `pkg/stats` — Stats Tracking
 ```go
@@ -616,6 +630,9 @@ stats.Group(c, "iptv")                 // untuk endpoint tanpa platform
 
 3. cmd/seed/main.go
    → tambah "cobalt" ke content:provider:* key yang relevan
+
+4. router/router.go
+   → tambah key "content:provider:cobalt" di slice InitProviderCache
 ```
 
 ### Menambah platform vidhub baru (misal: Vidplay)
@@ -672,7 +689,7 @@ stats.Group(c, "iptv")                 // untuk endpoint tanpa platform
 | Skenario | File yang disentuh |
 |---|---|
 | Platform content baru | `content/{nama}/` + `cache.go` + `router/content.go` + `seed` + `allowed_domains.json` + `admin/handler.go` |
-| Provider content baru | `content/provider/{nama}/` + `router/content.go` + `seed` |
+| Provider content baru | `content/provider/{nama}/` + `router/content.go` + `seed` + `router/router.go` (InitProviderCache) |
 | Platform vidhub baru | `vidhub/{nama}/` + `cache.go` + `router/vidhub.go` + `seed` + `allowed_domains.json` + `admin/handler.go` |
 | Format convert baru | `service.go` + `validator.go` + `cloudconvert.go` + `convertio.go` |
 | Provider convert baru | `convert/provider/{nama}/` + `router/convert.go` |
@@ -721,7 +738,7 @@ stats.Group(c, "iptv")                 // untuk endpoint tanpa platform
 - [ ] CF Worker: tambah Referer header untuk Convertio URLs (server_1 masih 403)
 - [ ] Cache hasil convert untuk hemat credits CloudConvert/Convertio
 - [ ] Dokumentasi API publik (Postman collection atau README terpisah)
-- [ ] Provider priority pindah ke memory (kurangi hit Redis)
+- [ ] Provider priority pindah ke memory (kurangi hit Redis) ✅ Selesai
 - [ ] URL versioning `/v1/`
 - [ ] Konsolidasi `writeJSONUnescaped` ke `pkg/httputil` ✅ Selesai
 - [ ] Konsolidasi `sanitizeFilename` ke `pkg/fileutil` ✅ Selesai
@@ -731,6 +748,11 @@ stats.Group(c, "iptv")                 // untuk endpoint tanpa platform
 - [ ] Stats tracking per platform via SQLite ✅ Selesai
 - [ ] IPTV playlist endpoint (`GET /iptv/playlist`) ✅ Selesai
 - [ ] IPTV stream format detection (`format` field) ✅ Selesai
+- [ ] gin.ReleaseMode di production ✅ Selesai
+- [ ] Async stats write via buffered channel ✅ Selesai
+- [ ] Convertvalidator timeout turun ke 3 detik
+- [ ] Cleanup stats scheduler (hapus data > 90 hari)
+- [ ] Structured logging via slog
 
 ---
 
@@ -751,3 +773,6 @@ stats.Group(c, "iptv")                 // untuk endpoint tanpa platform
 | SMIL URL tidak di-resolve ke chunklist | Chunklist berisi token dinamis yang expire — VLC fetch sendiri dengan header yang benar |
 | Graceful shutdown 30 detik | HLS download bisa makan waktu lama, tidak boleh terputus paksa |
 | IPTV playlist auth via `?key=` | Player seperti VLC tidak bisa kirim custom header |
+| `gin.ReleaseMode` di production | Matikan debug logging, kurangi I/O overhead di traffic tinggi |
+| Async stats write via buffered channel | Hilangkan SQLite write latency dari request path, stats boleh tidak 100% akurat |
+| Provider priority di memory (`pkg/cache/provider_cache.go`) | Hilangkan Redis round-trip per request, sync dari Redis setiap 5 menit |
