@@ -11,6 +11,7 @@ import (
 	convertioprovider "vidbot-api/internal/services/convert/provider/convertio"
 
 	"vidbot-api/internal/stream"
+	"vidbot-api/pkg/cache"
 	"vidbot-api/pkg/iptvstore"
 	"vidbot-api/pkg/proxy"
 
@@ -18,9 +19,20 @@ import (
 )
 
 func Setup(r *gin.Engine, cfg *config.Config) {
-	// proxy clients
 	proxyClient := proxy.NewClient(cfg.WorkerURLs, cfg.WorkerSecret)
 	contentProxyClient := proxy.NewClient([]string{cfg.ContentWorkerURL}, cfg.ContentWorkerSecret)
+
+	cache.InitProviderCache([]string{
+		"content:provider:spotify",
+		"content:provider:tiktok",
+		"content:provider:instagram",
+		"content:provider:twitter",
+		"content:provider:threads",
+		"convert:provider:audio",
+		"convert:provider:document",
+		"convert:provider:image",
+		"convert:provider:fonts",
+	})
 
 	// IPTV store
 	if err := iptvstore.Default.Init(); err != nil {

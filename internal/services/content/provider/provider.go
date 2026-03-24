@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"context"
 	"vidbot-api/pkg/cache"
 )
 
@@ -55,11 +54,10 @@ type Provider interface {
 }
 
 func ResolveProviderForCategory(providers []Provider, category string) []Provider {
-	ctx := context.Background()
 	key := "content:provider:" + category
+	names := cache.GetProviderOrder(key)
 
-	names, err := cache.LRange(ctx, key)
-	if err != nil || len(names) == 0 {
+	if len(names) == 0 {
 		return providers
 	}
 

@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"context"
 	"strings"
 	"vidbot-api/pkg/cache"
 )
@@ -43,16 +42,13 @@ func ResolveProvider(providers []Provider, jobID string) Provider {
 
 // ResolveProviderForCategory — ambil provider priority dari Redis, fallback ke urutan default
 func ResolveProviderForCategory(providers []Provider, category string) []Provider {
-	ctx := context.Background()
 	key := "convert:provider:" + category
+	names := cache.GetProviderOrder(key)
 
-	names, err := cache.LRange(ctx, key)
-	if err != nil || len(names) == 0 {
-		// fallback — pakai urutan yang didaftarkan di router
+	if len(names) == 0 {
 		return providers
 	}
 
-	// susun ulang providers sesuai priority dari Redis
 	providerMap := make(map[string]Provider)
 	for _, p := range providers {
 		providerMap[p.Name()] = p

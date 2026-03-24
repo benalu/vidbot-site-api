@@ -36,7 +36,7 @@ func main() {
 	if err := stats.Init("data/stats/stats.db"); err != nil {
 		log.Printf("[stats] init error: %v", err)
 	}
-
+	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 	router.Setup(r, cfg)
 
