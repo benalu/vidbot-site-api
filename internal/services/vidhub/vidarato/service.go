@@ -1,6 +1,7 @@
 package vidarato
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -82,13 +83,12 @@ func (s *Service) fetchTitle(pageURL, baseURL string) string {
 }
 
 func (s *Service) fetchStreamURL(baseURL, filecode, referer string) (string, string, error) {
-	apiURL := fmt.Sprintf("%s/api/stream?filecode=%s", baseURL, filecode)
+	apiURL := fmt.Sprintf("%s/api/stream", baseURL)
 
 	// coba worker dulu
-	body, err := s.fetchViaWorker(apiURL, baseURL)
+	body, err := s.fetchViaWorkerPOST(apiURL, baseURL, filecode)
 	if err != nil {
-		// fallback tls-client
-		body, err = s.fetchViaTLSClient(apiURL, baseURL)
+		body, err = s.fetchViaTLSClientPOST(apiURL, baseURL, filecode)
 		if err != nil {
 			return "", "", fmt.Errorf("stream API failed: %w", err)
 		}
@@ -125,6 +125,63 @@ func (s *Service) fetchViaWorker(targetURL, baseURL string) (string, error) {
 	}
 
 	return resp.Body, nil
+}
+
+func (s *Service) fetchViaWorkerPOST(targetURL, baseURL, filecode string) (string, error) {
+	bodyBytes, _ := json.Marshal(map[string]string{"filecode": filecode})
+	headers := map[string]string{
+		"Content-Type": "application/json",
+		"Referer":      baseURL + "/",
+		"User-Agent":   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+	}
+
+	resp, err := s.proxyClient.Do("POST", targetURL, headers, string(bodyBytes), "follow")
+	if err != nil {
+		return "", err
+	}
+	if resp.Status != 200 {
+		return "", fmt.Errorf("worker HTTP %d", resp.Status)
+	}
+	return resp.Body, nil
+}
+
+func (s *Service) fetchViaTLSClientPOST(targetURL, baseURL, filecode string) (string, error) {
+	jar := tls_client.NewCookieJar()
+	options := []tls_client.HttpClientOption{
+		tls_client.WithTimeoutSeconds(15),
+		tls_client.WithClientProfile(profiles.Chrome_120),
+		tls_client.WithCookieJar(jar),
+	}
+
+	client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+	if err != nil {
+		return "", err
+	}
+
+	bodyBytes, _ := json.Marshal(map[string]string{"filecode": filecode})
+	req, err := http.NewRequest(http.MethodPost, targetURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Referer", baseURL+"/")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
 
 func (s *Service) fetchViaTLSClient(targetURL, baseURL string) (string, error) {

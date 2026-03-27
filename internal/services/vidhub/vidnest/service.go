@@ -3,10 +3,12 @@ package vidnest
 import (
 	"fmt"
 	"io"
+	"log"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"vidbot-api/pkg/fileutil"
 	"vidbot-api/pkg/proxy"
@@ -40,9 +42,13 @@ func (s *Service) Extract(rawURL string) (*Result, error) {
 		return nil, fmt.Errorf("invalid vidnest URL")
 	}
 
+	t0 := time.Now()
 	html, err := s.fetchViaWorker(rawURL)
+	log.Printf("[vidnest] fetchViaWorker: %v, err=%v", time.Since(t0), err != nil)
 	if err != nil {
+		t1 := time.Now()
 		html, err = s.fetchViaTLSClient(rawURL)
+		log.Printf("[vidnest] fetchViaTLSClient: %v, err=%v", time.Since(t1), err != nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch page: %w", err)
 		}

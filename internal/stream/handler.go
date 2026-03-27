@@ -105,27 +105,31 @@ func (h *Handler) streamDirect(c *gin.Context, payload *downloader.Payload) {
 	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 	c.Header("Content-Type", contentType)
 	c.Header("Accept-Ranges", "bytes")
+	c.Header("Cache-Control", "no-cache")
 	if cl := resp.Header.Get("Content-Length"); cl != "" {
 		c.Header("Content-Length", cl)
 	}
 	if cr := resp.Header.Get("Content-Range"); cr != "" {
 		c.Header("Content-Range", cr)
 	}
+	// forward Last-Modified supaya browser bisa resume
+	if lm := resp.Header.Get("Last-Modified"); lm != "" {
+		c.Header("Last-Modified", lm)
+	}
 	c.Status(resp.StatusCode)
 
 	buf := make([]byte, 256*1024)
-	c.Stream(func(w io.Writer) bool {
-		select {
-		case <-c.Request.Context().Done():
-			return false
-		default:
-		}
-		n, err := resp.Body.Read(buf)
-		if n > 0 {
-			w.Write(buf[:n])
-		}
-		return err == nil
-	})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		io.CopyBuffer(c.Writer, resp.Body, buf)
+	}()
+
+	select {
+	case <-c.Request.Context().Done():
+		return
+	case <-done:
+	}
 }
 
 func (h *Handler) streamViaYTDLP(c *gin.Context, payload *downloader.Payload, toolsDir string) {
