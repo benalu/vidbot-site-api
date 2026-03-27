@@ -96,7 +96,7 @@ func (h *Handler) Convert(c *gin.Context) {
 		result.DownloadURL, titleWithoutExt, result.Filename, "", ext, "convert",
 	)
 	server2 := downloader.GenerateServer2URL(
-		h.appURL, h.streamSecret,
+		h.appURL, h.streamSecret, downloader.CacheKey("convert", "fonts", result.DownloadURL),
 		result.DownloadURL, titleWithoutExt, result.Filename, "", ext, "convert",
 	)
 
@@ -189,7 +189,7 @@ func (h *Handler) Upload(c *gin.Context) {
 		result.DownloadURL, titleWithoutExt, result.Filename, "", ext, "convert",
 	)
 	server2 := downloader.GenerateServer2URL(
-		h.appURL, h.streamSecret,
+		h.appURL, h.streamSecret, downloader.CacheKey("convert", "fonts", result.DownloadURL),
 		result.DownloadURL, titleWithoutExt, result.Filename, "", ext, "convert",
 	)
 

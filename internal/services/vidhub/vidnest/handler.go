@@ -50,6 +50,8 @@ func (h *Handler) Extract(c *gin.Context) {
 		return
 	}
 
+	cacheKey := downloader.CacheKey("vidhub", "vidnest", req.URL)
+
 	if cached, err := downloader.CacheGet[mediaresponse.VidhubResponse]("vidhub", "vidnest", req.URL); err == nil && cached != nil {
 		ext := downloader.MediaTypeToExt(downloader.VideoType(cached.Type))
 		cached.Download.Server1 = downloader.GenerateServer1URL(
@@ -57,7 +59,7 @@ func (h *Handler) Extract(c *gin.Context) {
 			cached.Download.Original, cached.Data.Title, cached.Data.Filename, cached.Data.Filecode, ext, "vidhub",
 		)
 		cached.Download.Server2 = downloader.GenerateServer2URL(
-			h.appURL, h.streamSecret,
+			h.appURL, h.streamSecret, cacheKey,
 			cached.Download.Original, cached.Data.Title, cached.Data.Filename, cached.Data.Filecode, ext, "vidhub",
 		)
 		httputil.WriteJSONOK(c, cached)
@@ -98,7 +100,7 @@ func (h *Handler) Extract(c *gin.Context) {
 		result.DownloadURL, result.Title, result.Filename, result.Filecode, ext, "vidhub",
 	)
 	res.Download.Server2 = downloader.GenerateServer2URL(
-		h.appURL, h.streamSecret,
+		h.appURL, h.streamSecret, cacheKey,
 		result.DownloadURL, result.Title, result.Filename, result.Filecode, ext, "vidhub",
 	)
 

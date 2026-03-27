@@ -38,7 +38,7 @@ func InitKeys(encKey, hmacKeyStr string) {
 }
 
 // =====================
-// SERVER 2 — AES+HMAC
+// SERVER 2 — AES+HMAC (dipertahankan untuk DecodePayload)
 // =====================
 
 func encodePayload(payload Payload) (string, error) {
@@ -84,6 +84,34 @@ func encodePayload(payload Payload) (string, error) {
 }
 
 func DecodePayload(token string) (*Payload, error) {
+	// coba shortlink dulu (16 hex chars, tanpa titik)
+	if len(token) == 16 && !strings.Contains(token, ".") {
+		if isHex(token) {
+			return resolveShortlink(token)
+		}
+	}
+
+	// fallback ke AES decode lama
+	return decodeAESPayload(token)
+}
+
+func resolveShortlink(key string) (*Payload, error) {
+	// import dihindari circular — pakai package shortlink via interface
+	// kita delegasikan ke ShortlinkResolver yang di-inject saat init
+	if shortlinkResolver == nil {
+		return nil, fmt.Errorf("shortlink resolver not initialized")
+	}
+	return shortlinkResolver(key)
+}
+
+// ShortlinkResolver — di-set dari main/router untuk hindari circular import
+var shortlinkResolver func(key string) (*Payload, error)
+
+func SetShortlinkResolver(fn func(key string) (*Payload, error)) {
+	shortlinkResolver = fn
+}
+
+func decodeAESPayload(token string) (*Payload, error) {
 	parts := strings.SplitN(token, ".", 2)
 	if len(parts) != 2 {
 		return nil, fmt.Errorf("invalid token format")
@@ -143,6 +171,15 @@ func DecodePayload(token string) (*Payload, error) {
 	return &p, nil
 }
 
+func isHex(s string) bool {
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
 // =====================
 // SERVER 1 — XOR + hex
 // =====================
@@ -183,8 +220,10 @@ func GenerateServer1URL(downloadWorkerURL, downloadWorkerSecret, xorKey, downloa
 	return fmt.Sprintf("%s/dl?url=%s", base, encoded)
 }
 
-func GenerateServer2URL(appURL, streamSecret, downloadURL, title, filename, filecode, ext, service string) string {
-	encoded, err := encodePayload(Payload{
+// GenerateServer2URL — pakai shortlink Redis, idempoten via cacheKey
+// BARU
+func GenerateServer2URL(appURL, streamSecret, cacheKey, downloadURL, title, filename, filecode, ext, service string) string {
+	payload := Payload{
 		URL:      downloadURL,
 		Title:    title,
 		Filename: filename,
@@ -192,13 +231,30 @@ func GenerateServer2URL(appURL, streamSecret, downloadURL, title, filename, file
 		Ext:      ext,
 		Service:  service,
 		Secret:   streamSecret,
-	})
-	if err != nil {
+	}
 
+	if shortlinkCreator != nil {
+		key, err := shortlinkCreator(payload, cacheKey)
+		if err == nil {
+			base := strings.TrimRight(appURL, "/")
+			return fmt.Sprintf("%s/dl?url=%s", base, key)
+		}
+	}
+
+	// fallback ke AES encode
+	encoded, err := encodePayload(payload)
+	if err != nil {
 		return ""
 	}
 	base := strings.TrimRight(appURL, "/")
 	return fmt.Sprintf("%s/dl?url=%s", base, encoded)
+}
+
+// update signature ShortlinkCreator
+var shortlinkCreator func(payload Payload, cacheKey string) (string, error)
+
+func SetShortlinkCreator(fn func(payload Payload, cacheKey string) (string, error)) {
+	shortlinkCreator = fn
 }
 
 func ResolveFilename(title, filename, filecode, ext string) string {

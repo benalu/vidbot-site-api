@@ -20,6 +20,12 @@ sudo systemctl restart vidbot-api-go
 tail -f /home/ubuntu/vidbot-api-go/logs/out.log
 tail -f /home/ubuntu/vidbot-api-go/logs/error.log
 sudo systemctl status vidbot-api-go
+
+# UNZIP
+cd /home/ubuntu/vidbot-api-go/data/leakcheck
+unzip 23Jan26.zip
+rm 23Jan26.zip
+
 ```
 
 ---

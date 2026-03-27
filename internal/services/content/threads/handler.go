@@ -63,7 +63,7 @@ func (h *Handler) Extract(c *gin.Context) {
 					m.Original, customTitle, "", "", "mp4", "content",
 				)
 				cached.Download.Media[i].Server2 = downloader.GenerateServer2URL(
-					h.appURL, h.streamSecret,
+					h.appURL, h.streamSecret, downloader.CacheKey("content", "threads", m.Original),
 					m.Original, customTitle, "", "", "mp4", "content",
 				)
 			}
@@ -95,7 +95,7 @@ func (h *Handler) Extract(c *gin.Context) {
 				m.URL, customTitle, "", "", m.Extension, "content",
 			)
 			item.Server2 = downloader.GenerateServer2URL(
-				h.appURL, h.streamSecret,
+				h.appURL, h.streamSecret, downloader.CacheKey("content", "threads", m.URL),
 				m.URL, customTitle, "", "", m.Extension, "content",
 			)
 		}

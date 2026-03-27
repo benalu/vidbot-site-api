@@ -63,7 +63,7 @@ func (h *Handler) Extract(c *gin.Context) {
 				v.Original, customTitle, "", "", ext, "content",
 			)
 			cached.Download.Video[i].Server2 = downloader.GenerateServer2URL(
-				h.appURL, h.streamSecret,
+				h.appURL, h.streamSecret, downloader.CacheKey("content", "instagram", v.Original),
 				v.Original, customTitle, "", "", ext, "content",
 			)
 		}
@@ -74,7 +74,7 @@ func (h *Handler) Extract(c *gin.Context) {
 				cached.Download.Audio.Original, audioTitle, "", "", "mp3", "content",
 			)
 			cached.Download.Audio.Server2 = downloader.GenerateServer2URL(
-				h.appURL, h.streamSecret,
+				h.appURL, h.streamSecret, downloader.CacheKey("content", "instagram", cached.Download.Audio.Original),
 				cached.Download.Audio.Original, audioTitle, "", "", "mp3", "content",
 			)
 		}
@@ -101,7 +101,7 @@ func (h *Handler) Extract(c *gin.Context) {
 			v.URL, customTitle, "", "", ext, "content",
 		)
 		server2 := downloader.GenerateServer2URL(
-			h.appURL, h.streamSecret,
+			h.appURL, h.streamSecret, downloader.CacheKey("content", "instagram", v.URL),
 			v.URL, customTitle, "", "", ext, "content",
 		)
 		videos = append(videos, mediaresponse.ContentVideoQuality{
@@ -128,7 +128,7 @@ func (h *Handler) Extract(c *gin.Context) {
 				result.AudioURL, audioTitle, "", "", audioExt, "content",
 			),
 			Server2: downloader.GenerateServer2URL(
-				h.appURL, h.streamSecret,
+				h.appURL, h.streamSecret, downloader.CacheKey("content", "instagram", result.AudioURL),
 				result.AudioURL, audioTitle, "", "", audioExt, "content",
 			),
 		}

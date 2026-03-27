@@ -12,8 +12,10 @@ import (
 
 	"vidbot-api/internal/stream"
 	"vidbot-api/pkg/cache"
+	"vidbot-api/pkg/downloader"
 	"vidbot-api/pkg/iptvstore"
 	"vidbot-api/pkg/proxy"
+	"vidbot-api/pkg/shortlink"
 
 	"github.com/gin-gonic/gin"
 )
@@ -34,6 +36,14 @@ func Setup(r *gin.Engine, cfg *config.Config) {
 		"convert:provider:fonts",
 	})
 
+	// wire shortlink ke downloader (hindari circular import)
+	downloader.SetShortlinkCreator(func(payload downloader.Payload, cacheKey string) (string, error) {
+		return shortlink.Create(payload, cacheKey)
+	})
+	downloader.SetShortlinkResolver(func(key string) (*downloader.Payload, error) {
+		return shortlink.Resolve(key)
+	})
+
 	// IPTV store
 	if err := iptvstore.Default.Init(); err != nil {
 		log.Printf("[iptv] WARNING: init failed, all /iptv/* endpoints will return empty data: %v", err)
@@ -50,13 +60,12 @@ func Setup(r *gin.Engine, cfg *config.Config) {
 		convertioprovider.New(cfg.ConvertioAPIKey),
 	}
 
-	// stream handler (tidak butuh sub-router, hanya satu route)
+	// stream handler
 	streamHandler := stream.NewHandler()
 	r.GET("/dl", func(c *gin.Context) {
 		streamHandler.Stream(c, cfg.StreamSecret, cfg.ToolsDir)
 	})
 
-	// sub-router per grup
 	setupHealth(r, cfg)
 	setupAuth(r, cfg)
 	setupAdmin(r, cfg)
@@ -67,7 +76,6 @@ func Setup(r *gin.Engine, cfg *config.Config) {
 	setupLeakcheck(r, cfg)
 }
 
-// buildContentProviders menyusun provider per platform content.
 type contentProviderSet struct {
 	tiktok    []contentprovider.Provider
 	instagram []contentprovider.Provider
@@ -96,7 +104,6 @@ func buildContentProviders(client *proxy.Client) contentProviderSet {
 		},
 		spotify: []contentprovider.Provider{
 			downr.New(client),
-			// vidown tidak support spotify
 		},
 	}
 }

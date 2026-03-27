@@ -53,13 +53,15 @@ func (h *Handler) Extract(c *gin.Context) {
 		return
 	}
 
+	cacheKey := downloader.CacheKey("content", "spotify", req.URL)
+
 	if cached, err := downloader.CacheGet[mediaresponse.SpotifyResponse]("content", "spotify", req.URL); err == nil && cached != nil {
 		cached.Download.Server1 = downloader.GenerateServer1URL(
 			h.downloadWorkerURL, h.downloadWorkerSecret, h.workerXORKey,
 			cached.Download.Original, cached.Data.Title, "", "", cached.Type, "content",
 		)
 		cached.Download.Server2 = downloader.GenerateServer2URL(
-			h.appURL, h.streamSecret,
+			h.appURL, h.streamSecret, cacheKey,
 			cached.Download.Original, cached.Data.Title, "", "", cached.Type, "content",
 		)
 		httputil.WriteJSONOK(c, cached)
@@ -106,7 +108,7 @@ func (h *Handler) Extract(c *gin.Context) {
 		result.AudioURL, result.Title, "", "", ext, "content",
 	)
 	res.Download.Server2 = downloader.GenerateServer2URL(
-		h.appURL, h.streamSecret,
+		h.appURL, h.streamSecret, cacheKey,
 		result.AudioURL, result.Title, "", "", ext, "content",
 	)
 
