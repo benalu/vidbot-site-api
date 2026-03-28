@@ -7,7 +7,7 @@ var (
 	DirectStream  = New(10) // direct relay max 10
 	cdnLimiterMu  sync.Mutex
 	cdnLimiters   = make(map[string]*Limiter)
-	cdnMaxPerHost = 2 // max 2 concurrent download ke CDN yang sama
+	cdnMaxPerHost = 1
 )
 
 func AcquireCDN(host string) bool {

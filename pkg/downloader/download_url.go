@@ -12,17 +12,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"strings"
 )
 
 type Payload struct {
-	URL      string `json:"url"`
-	Title    string `json:"title"`
-	Filename string `json:"filename"`
-	Filecode string `json:"filecode"`
-	Ext      string `json:"ext"`
-	Service  string `json:"service"`
-	Secret   string `json:"secret"`
+	URL       string `json:"url"`
+	Title     string `json:"title"`
+	Filename  string `json:"filename"`
+	Filecode  string `json:"filecode"`
+	Ext       string `json:"ext"`
+	Service   string `json:"service"`
+	Secret    string `json:"secret"`
+	CDNOrigin string `json:"cdn_origin,omitempty"`
 }
 
 var (
@@ -109,6 +111,14 @@ var shortlinkResolver func(key string) (*Payload, error)
 
 func SetShortlinkResolver(fn func(key string) (*Payload, error)) {
 	shortlinkResolver = fn
+}
+
+func ExtractCDNOrigin(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Host == "" {
+		return ""
+	}
+	return parsed.Scheme + "://" + parsed.Host
 }
 
 func decodeAESPayload(token string) (*Payload, error) {
@@ -203,6 +213,55 @@ func encodeWorkerPayload(payload Payload, xorKey string) string {
 }
 
 // =====================
+// GENERATE URLs HLS
+// =====================
+
+// GenerateServer1HLSURL — khusus untuk HLS/m3u8, membawa CDNOrigin di payload
+func GenerateServer1HLSURL(downloadWorkerURL, downloadWorkerSecret, xorKey, downloadURL, title, filename, filecode, ext, service, cdnOrigin string) string {
+	encoded := encodeWorkerPayload(Payload{
+		URL:       downloadURL,
+		Title:     title,
+		Filename:  filename,
+		Filecode:  filecode,
+		Ext:       ext,
+		Service:   service,
+		Secret:    downloadWorkerSecret,
+		CDNOrigin: cdnOrigin,
+	}, xorKey)
+	base := strings.TrimRight(downloadWorkerURL, "/")
+	return fmt.Sprintf("%s/dl?url=%s", base, encoded)
+}
+
+// GenerateServer2HLSURL — khusus untuk HLS/m3u8, membawa CDNOrigin di payload
+func GenerateServer2HLSURL(appURL, streamSecret, cacheKey, downloadURL, title, filename, filecode, ext, service, cdnOrigin string) string {
+	payload := Payload{
+		URL:       downloadURL,
+		Title:     title,
+		Filename:  filename,
+		Filecode:  filecode,
+		Ext:       ext,
+		Service:   service,
+		Secret:    streamSecret,
+		CDNOrigin: cdnOrigin,
+	}
+
+	if shortlinkCreator != nil {
+		key, err := shortlinkCreator(payload, cacheKey)
+		if err == nil {
+			base := strings.TrimRight(appURL, "/")
+			return fmt.Sprintf("%s/dl?url=%s", base, key)
+		}
+	}
+
+	encoded, err := encodePayload(payload)
+	if err != nil {
+		return ""
+	}
+	base := strings.TrimRight(appURL, "/")
+	return fmt.Sprintf("%s/dl?url=%s", base, encoded)
+}
+
+// =====================
 // GENERATE URLs
 // =====================
 
@@ -221,7 +280,6 @@ func GenerateServer1URL(downloadWorkerURL, downloadWorkerSecret, xorKey, downloa
 }
 
 // GenerateServer2URL — pakai shortlink Redis, idempoten via cacheKey
-// BARU
 func GenerateServer2URL(appURL, streamSecret, cacheKey, downloadURL, title, filename, filecode, ext, service string) string {
 	payload := Payload{
 		URL:      downloadURL,

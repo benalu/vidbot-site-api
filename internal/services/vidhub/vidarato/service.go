@@ -23,6 +23,7 @@ type Result struct {
 	Filename  string
 	M3U8URL   string
 	Thumbnail string
+	CDNOrigin string
 }
 
 type Service struct {
@@ -63,7 +64,16 @@ func (s *Service) Extract(rawURL string) (*Result, error) {
 		Filename:  filename,
 		M3U8URL:   m3u8URL,
 		Thumbnail: thumbnail,
+		CDNOrigin: extractCDNOrigin(m3u8URL),
 	}, nil
+}
+
+func extractCDNOrigin(m3u8URL string) string {
+	parsed, err := url.Parse(m3u8URL)
+	if err != nil || parsed.Host == "" {
+		return ""
+	}
+	return parsed.Scheme + "://" + parsed.Host
 }
 
 func (s *Service) fetchTitle(pageURL, baseURL string) string {

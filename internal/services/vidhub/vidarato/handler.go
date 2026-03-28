@@ -56,18 +56,20 @@ func (h *Handler) Extract(c *gin.Context) {
 
 	if cached, err := downloader.CacheGet[mediaresponse.VidhubResponse]("vidhub", "vidarato", req.URL); err == nil && cached != nil {
 		ext := downloader.MediaTypeToExt(downloader.VideoType(cached.Type))
-		cached.Download.Server1 = downloader.GenerateServer1URL(
+		cdnOrigin := downloader.ExtractCDNOrigin(cached.Download.Original) // ← derive langsung dari URL
+		cached.Download.Server1 = downloader.GenerateServer1HLSURL(
 			h.downloadWorkerURL, h.downloadWorkerSecret, h.workerXORKey,
-			cached.Download.Original, cached.Data.Title, cached.Data.Filename, cached.Data.Filecode, ext, "vidhub",
+			cached.Download.Original, cached.Data.Title, cached.Data.Filename,
+			cached.Data.Filecode, ext, "vidhub", cdnOrigin,
 		)
-		cached.Download.Server2 = downloader.GenerateServer2URL(
+		cached.Download.Server2 = downloader.GenerateServer2HLSURL(
 			h.appURL, h.streamSecret, cacheKey,
-			cached.Download.Original, cached.Data.Title, cached.Data.Filename, cached.Data.Filecode, ext, "vidhub",
+			cached.Download.Original, cached.Data.Title, cached.Data.Filename,
+			cached.Data.Filecode, ext, "vidhub", cdnOrigin,
 		)
 		response.WriteJSON(c, http.StatusOK, cached)
 		return
 	}
-
 	result, err := h.service.Extract(req.URL)
 	if err != nil {
 		log.Printf("[vidarato] extract error: %v", err)
@@ -96,13 +98,13 @@ func (h *Handler) Extract(c *gin.Context) {
 
 	downloader.CacheSet("vidhub", "vidarato", req.URL, &res)
 
-	res.Download.Server1 = downloader.GenerateServer1URL(
+	res.Download.Server1 = downloader.GenerateServer1HLSURL(
 		h.downloadWorkerURL, h.downloadWorkerSecret, h.workerXORKey,
-		result.M3U8URL, result.Title, result.Filename, result.Filecode, ext, "vidhub",
+		result.M3U8URL, result.Title, result.Filename, result.Filecode, ext, "vidhub", result.CDNOrigin,
 	)
-	res.Download.Server2 = downloader.GenerateServer2URL(
+	res.Download.Server2 = downloader.GenerateServer2HLSURL(
 		h.appURL, h.streamSecret, cacheKey,
-		result.M3U8URL, result.Title, result.Filename, result.Filecode, ext, "vidhub",
+		result.M3U8URL, result.Title, result.Filename, result.Filecode, ext, "vidhub", result.CDNOrigin,
 	)
 
 	response.WriteJSON(c, http.StatusOK, res)

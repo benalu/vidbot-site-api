@@ -3,6 +3,7 @@ package kingbokeptv
 import (
 	"fmt"
 	"io"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -21,6 +22,7 @@ type Result struct {
 	M3U8URL   string
 	Thumbnail string
 	Duration  string
+	CDNOrigin string
 }
 
 type Service struct {
@@ -64,7 +66,16 @@ func (s *Service) Extract(rawURL string) (*Result, error) {
 		M3U8URL:   m3u8URL,
 		Thumbnail: thumbnail,
 		Duration:  duration,
+		CDNOrigin: extractCDNOrigin(m3u8URL),
 	}, nil
+}
+
+func extractCDNOrigin(m3u8URL string) string {
+	parsed, err := url.Parse(m3u8URL)
+	if err != nil || parsed.Host == "" {
+		return ""
+	}
+	return parsed.Scheme + "://" + parsed.Host
 }
 
 func (s *Service) fetchViaWorker(targetURL string) (string, error) {

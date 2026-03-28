@@ -63,9 +63,8 @@ var (
 func CancelAllSessions() {
 	hlsSessionsMu.Lock()
 	defer hlsSessionsMu.Unlock()
-	for key, sess := range hlsSessions {
+	for _, sess := range hlsSessions {
 		if sess.cancel != nil {
-			log.Printf("[progressive] shutdown: cancelling session %s", key)
 			sess.cancel()
 		}
 	}
@@ -223,16 +222,27 @@ func hlsHeaders(m3u8URL string) map[string]string {
 }
 
 func resolveOriginReferer(cdnHost string) (string, string) {
-	mappings := map[string]string{
-		// tambah mapping baru kalau ada site baru
+	// exact match dulu
+	exactMappings := map[string]string{
 		"stream.kingbokep.video": "https://kingbokep.tv",
 		"cdn.kingbokep.video":    "https://kingbokep.tv",
 	}
-	for cdn, origin := range mappings {
-		if strings.Contains(cdnHost, cdn) {
+	if origin, ok := exactMappings[cdnHost]; ok {
+		return origin, origin + "/"
+	}
+
+	// suffix match — untuk CDN dengan subdomain random
+	// misal: 112b80.s1q2105.com → match "s1q2105.com"
+	suffixMappings := map[string]string{
+		"s1q2105.com": "https://vidara.so",
+		// tambah di sini kalau ada CDN baru dengan pola subdomain random
+	}
+	for suffix, origin := range suffixMappings {
+		if strings.HasSuffix(cdnHost, suffix) {
 			return origin, origin + "/"
 		}
 	}
+
 	// fallback: strip subdomain
 	parts := strings.Split(cdnHost, ".")
 	if len(parts) >= 2 {
@@ -267,31 +277,35 @@ func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
-// deriveOrigin — cari origin dari CDN host
-// stream.kingbokep.video → https://kingbokep.tv
-func deriveOrigin(cdnHost string) string {
-	// strip subdomain CDN (stream., cdn., media., dll)
-	parts := strings.Split(cdnHost, ".")
-	if len(parts) >= 3 {
-		// ambil 2 bagian terakhir: kingbokep.video → cek apakah ada TLD yang lebih spesifik
-		mainDomain := strings.Join(parts[len(parts)-2:], ".")
-		// mapping khusus kalau CDN domain berbeda dari main domain
-		// stream.kingbokep.video → kingbokep.tv (bukan .video)
-		knownMappings := map[string]string{
-			"kingbokep.video": "https://kingbokep.tv",
-		}
-		if origin, ok := knownMappings[mainDomain]; ok {
-			return origin
-		}
-		return "https://" + mainDomain
-	}
-	return "https://" + cdnHost
-}
-
 func fetchPlaylist(ctx context.Context, client *http.Client, m3u8URL string, headers map[string]string) ([]string, string, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", m3u8URL, nil)
+	body, baseURL, err := fetchM3U8Body(ctx, client, m3u8URL, headers)
 	if err != nil {
 		return nil, "", err
+	}
+
+	if isMasterPlaylist(body) {
+		subURL := extractFirstSubPlaylist(body, baseURL)
+		if subURL == "" {
+			return nil, "", fmt.Errorf("master playlist: no sub-playlist found")
+		}
+		body, baseURL, err = fetchM3U8Body(ctx, client, subURL, headers)
+		if err != nil {
+			return nil, "", fmt.Errorf("fetch sub-playlist: %w", err)
+		}
+	}
+
+	segments := extractSegments(body, baseURL)
+	if len(segments) == 0 {
+		return nil, "", fmt.Errorf("no segments found in playlist")
+	}
+
+	return segments, body, nil
+}
+
+func fetchM3U8Body(ctx context.Context, client *http.Client, m3u8URL string, headers map[string]string) (string, string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", m3u8URL, nil)
+	if err != nil {
+		return "", "", err
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
@@ -299,22 +313,50 @@ func fetchPlaylist(ctx context.Context, client *http.Client, m3u8URL string, hea
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, "", err
+		return "", "", err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return nil, "", fmt.Errorf("playlist HTTP %d", resp.StatusCode)
+		return "", "", fmt.Errorf("playlist HTTP %d", resp.StatusCode)
 	}
 
-	body, _ := io.ReadAll(resp.Body)
-
-	// derive base URL untuk resolve relative segment URL
+	b, _ := io.ReadAll(resp.Body)
 	parsed, _ := url.Parse(m3u8URL)
 	basePath := parsed.Scheme + "://" + parsed.Host + filepath.ToSlash(filepath.Dir(parsed.Path))
 
+	return string(b), basePath, nil
+}
+
+func isMasterPlaylist(body string) bool {
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		lower := strings.ToLower(line)
+		return strings.HasSuffix(lower, ".m3u8") || strings.Contains(lower, ".m3u8?")
+	}
+	return false
+}
+
+func extractFirstSubPlaylist(body, baseURL string) string {
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "http") {
+			return line
+		}
+		return baseURL + "/" + line
+	}
+	return ""
+}
+
+func extractSegments(body, baseURL string) []string {
 	var segments []string
-	for _, line := range strings.Split(string(body), "\n") {
+	for _, line := range strings.Split(body, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
@@ -322,11 +364,10 @@ func fetchPlaylist(ctx context.Context, client *http.Client, m3u8URL string, hea
 		if strings.HasPrefix(line, "http") {
 			segments = append(segments, line)
 		} else {
-			segments = append(segments, basePath+"/"+line)
+			segments = append(segments, baseURL+"/"+line)
 		}
 	}
-
-	return segments, string(body), nil
+	return segments
 }
 
 // runDirectHLS — download .ts segments langsung → pipe ke ffmpeg → chunks
@@ -370,8 +411,6 @@ func runDirectHLS(ctx context.Context, m3u8URL, toolsDir string, sess *hlsSessio
 		return fmt.Errorf("no segments found in playlist")
 	}
 
-	log.Printf("[direct_hls] found %d segments for %s", len(segments), m3u8URL)
-
 	// spawn ffmpeg: baca dari stdin (ts stream), output mp4 ke stdout
 	ffmpegPath := "ffmpeg"
 	if toolsDir != "" {
@@ -404,7 +443,16 @@ func runDirectHLS(ctx context.Context, m3u8URL, toolsDir string, sess *hlsSessio
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
 			line := scanner.Text()
-			if strings.TrimSpace(line) != "" {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			// hanya log kalau mengandung kata error/fatal/warning
+			lower := strings.ToLower(line)
+			if strings.Contains(lower, "error") ||
+				strings.Contains(lower, "fatal") ||
+				strings.Contains(lower, "invalid") ||
+				strings.Contains(lower, "failed") {
 				log.Printf("[ffmpeg] %s", line)
 			}
 		}
@@ -455,7 +503,16 @@ func runDirectHLS(ctx context.Context, m3u8URL, toolsDir string, sess *hlsSessio
 				return
 			}
 
-			log.Printf("[direct_hls] segment %d/%d → ffmpeg (%d bytes)", i+1, len(segments), len(segData))
+			// jeda natural antar segment — simulasi browser buffering
+			// 300-800ms, cukup untuk tidak kelihatan seperti bot
+			// tapi tidak terlalu lama supaya stream tetap smooth
+			jeda := time.Duration(300+rand.Intn(500)) * time.Millisecond
+			select {
+			case <-ctx.Done():
+				dlDone <- fmt.Errorf("cancelled")
+				return
+			case <-time.After(jeda):
+			}
 		}
 		dlDone <- nil
 	}()
@@ -468,7 +525,7 @@ func runDirectHLS(ctx context.Context, m3u8URL, toolsDir string, sess *hlsSessio
 			n, readErr := io.ReadFull(stdout, buf)
 			if n > 0 {
 				sess.appendChunk(buf[:n])
-				log.Printf("[progressive] buffered chunk #%d (%d bytes)", sess.totalChunks()-1, n)
+
 			}
 			if readErr == io.EOF || readErr == io.ErrUnexpectedEOF {
 				readDone <- nil
@@ -502,7 +559,6 @@ func runDirectHLS(ctx context.Context, m3u8URL, toolsDir string, sess *hlsSessio
 	sess.mu.Unlock()
 	sess.signalNew()
 
-	log.Printf("[direct_hls] complete: %d chunks total", sess.totalChunks())
 	return nil
 }
 
@@ -551,7 +607,11 @@ func runYTDLP(ctx context.Context, m3u8URL, toolsDir string, sess *hlsSession) e
 		"--no-warnings",
 		"--user-agent", "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Mobile Safari/537.36 Edg/146.0.0.0",
 		"--referer", referer,
-		"--add-header", "Origin: https://kingbokep.tv",
+		"--add-header", fmt.Sprintf("Origin: %s", func() string {
+			p, _ := url.Parse(m3u8URL)
+			origin, _ := resolveOriginReferer(p.Host)
+			return origin
+		}()),
 		"--add-header", "Accept: */*",
 		"--add-header", "Accept-Language: id,en-US;q=0.9,en;q=0.8",
 		"--add-header", "sec-fetch-dest: empty",
@@ -575,11 +635,19 @@ func runYTDLP(ctx context.Context, m3u8URL, toolsDir string, sess *hlsSession) e
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
 			line := scanner.Text()
-			if strings.TrimSpace(line) != "" {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			stderrMu.Lock()
+			stderrBuf.WriteString(line + "\n")
+			stderrMu.Unlock()
+			lower := strings.ToLower(line)
+			if strings.Contains(lower, "error") ||
+				strings.Contains(lower, "fatal") ||
+				strings.Contains(lower, "invalid") ||
+				strings.Contains(lower, "failed") {
 				log.Printf("[yt-dlp] %s", line)
-				stderrMu.Lock()
-				stderrBuf.WriteString(line + "\n")
-				stderrMu.Unlock()
 			}
 		}
 	}()
@@ -588,14 +656,11 @@ func runYTDLP(ctx context.Context, m3u8URL, toolsDir string, sess *hlsSession) e
 		return fmt.Errorf("cmd start: %w", err)
 	}
 
-	log.Printf("[progressive] started yt-dlp for: %s", m3u8URL)
-
 	buf := make([]byte, chunkSize)
 	for {
 		n, readErr := io.ReadFull(stdout, buf)
 		if n > 0 {
 			sess.appendChunk(buf[:n])
-			log.Printf("[progressive] buffered chunk #%d (%d bytes)", sess.totalChunks()-1, n)
 		}
 		if readErr == io.EOF || readErr == io.ErrUnexpectedEOF {
 			break
@@ -619,7 +684,7 @@ func runYTDLP(ctx context.Context, m3u8URL, toolsDir string, sess *hlsSession) e
 		if isFragmentErr {
 			return fmt.Errorf("yt-dlp fragment error: %w", err)
 		}
-		log.Printf("[progressive] yt-dlp exit non-zero (%v) but %d chunks buffered, treating as complete", err, sess.totalChunks())
+
 	}
 
 	sess.mu.Lock()
@@ -627,7 +692,6 @@ func runYTDLP(ctx context.Context, m3u8URL, toolsDir string, sess *hlsSession) e
 	sess.mu.Unlock()
 	sess.signalNew()
 
-	log.Printf("[progressive] download complete: %d chunks total", sess.totalChunks())
 	return nil
 }
 
@@ -760,10 +824,23 @@ func (h *Handler) streamProgressive(c *gin.Context, payload *downloader.Payload,
 			})
 			return
 		}
-		defer limiter.HLSDownload.Release()
 	}
 
 	sess := getOrCreateSession(cacheKey, payload.URL, toolsDir)
+
+	if !sessionExists {
+		// release setelah session selesai, bukan setelah handler return
+		go func() {
+			for {
+				time.Sleep(2 * time.Second)
+				d, _ := sess.isDone()
+				if d {
+					limiter.HLSDownload.Release()
+					return
+				}
+			}
+		}()
+	}
 
 	sess.mu.Lock()
 	sess.readers++
@@ -782,7 +859,7 @@ func (h *Handler) streamProgressive(c *gin.Context, payload *downloader.Payload,
 			// grace period 2 menit — biarkan session tetap hidup
 			// supaya client reconnect tidak perlu restart dari awal
 			if age < 2*time.Minute {
-				log.Printf("[progressive] readers gone but session young (%v), keeping alive: %s", age, cacheKey)
+
 				return
 			}
 			log.Printf("[progressive] all readers gone after %v, cancelling: %s", age, cacheKey)
@@ -799,8 +876,6 @@ func (h *Handler) streamProgressive(c *gin.Context, payload *downloader.Payload,
 	// tidak trigger cancel
 	waitCtx, waitCancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer waitCancel()
-
-	log.Printf("[progressive] client waiting for %d chunks buffer...", bufferAhead)
 
 	if !sess.waitForChunk(bufferAhead-1, waitCtx) {
 		done, err := sess.isDone()
@@ -851,7 +926,7 @@ func (h *Handler) streamProgressive(c *gin.Context, payload *downloader.Payload,
 			if sessErr != nil {
 				log.Printf("[progressive] stream ended with error: %v", sessErr)
 			} else {
-				log.Printf("[progressive] stream complete: %d chunks sent", idx)
+
 			}
 			return
 		}
