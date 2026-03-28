@@ -19,6 +19,9 @@ func main() {
 			"videb.co",
 			"videb.lol",
 		},
+		"allowed_domains:kingbokeptv": {
+			"kingbokep.tv",
+		},
 		"allowed_domains:vidoy": {
 			"vidoy.co",
 			"vidoy.cam",

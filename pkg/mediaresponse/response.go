@@ -15,6 +15,7 @@ type VidhubData struct {
 	Filename  string `json:"filename"`
 	Thumbnail string `json:"thumbnail"`
 	Size      int64  `json:"size"`
+	Duration  string `json:"duration,omitempty"`
 }
 
 type VidhubResponse struct {

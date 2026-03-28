@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 	"vidbot-api/config"
+	"vidbot-api/internal/stream"
 	"vidbot-api/pkg/cache"
 	"vidbot-api/pkg/downloader"
 	"vidbot-api/pkg/leakcheck"
@@ -60,6 +61,8 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	stream.CancelAllSessions()
 
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Fatalf("Server forced to shutdown: %v", err)

@@ -13,16 +13,17 @@ import (
 
 // TTL per service:situs
 var cacheTTL = map[string]time.Duration{
-	"vidhub:videb":      2 * time.Hour,
-	"vidhub:vidoy":      1 * time.Hour,
-	"vidhub:vidbos":     2 * time.Hour,
-	"vidhub:vidarato":   2 * time.Hour,
-	"vidhub:vidnest":    2 * time.Hour,
-	"content:spotify":   30 * 24 * time.Hour,
-	"content:tiktok":    2 * time.Hour,
-	"content:instagram": 30 * time.Minute,
-	"content:twitter":   2 * time.Hour,
-	"content:threads":   30 * time.Minute,
+	"vidhub:videb":       2 * time.Hour,
+	"vidhub:vidoy":       1 * time.Hour,
+	"vidhub:vidbos":      2 * time.Hour,
+	"vidhub:vidarato":    2 * time.Hour,
+	"vidhub:vidnest":     2 * time.Hour,
+	"vidhub:kingbokeptv": 6 * time.Hour,
+	"content:spotify":    30 * 24 * time.Hour,
+	"content:tiktok":     2 * time.Hour,
+	"content:instagram":  30 * time.Minute,
+	"content:twitter":    2 * time.Hour,
+	"content:threads":    30 * time.Minute,
 }
 
 func defaultTTL() time.Duration {

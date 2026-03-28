@@ -279,7 +279,7 @@ var validGroups = map[string]bool{
 
 var validPlatforms = map[string][]string{
 	"content": {"spotify", "tiktok", "instagram", "twitter", "threads"},
-	"vidhub":  {"videb", "vidoy", "vidbos", "vidarato", "vidnest"},
+	"vidhub":  {"videb", "vidoy", "vidbos", "vidarato", "vidnest", "kingbokeptv"},
 	"convert": {"audio", "document", "image", "fonts"},
 }
 

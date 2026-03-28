@@ -2,6 +2,7 @@ package router
 
 import (
 	"vidbot-api/config"
+	"vidbot-api/internal/services/vidhub/kingbokeptv"
 	"vidbot-api/internal/services/vidhub/vidarato"
 	"vidbot-api/internal/services/vidhub/vidbos"
 	"vidbot-api/internal/services/vidhub/videb"
@@ -14,6 +15,11 @@ import (
 )
 
 func setupVidhub(r *gin.Engine, cfg *config.Config, proxyClient *proxy.Client) {
+	kingbokeptvHandler := kingbokeptv.NewHandler(
+		proxyClient,
+		cfg.DownloadWorkerURL, cfg.DownloadWorkerSecret,
+		cfg.WorkerPayloadXORKey, cfg.AppURL, cfg.StreamSecret,
+	)
 	videbHandler := videb.NewHandler(
 		proxyClient,
 		cfg.DownloadWorkerURL, cfg.DownloadWorkerSecret,
@@ -52,5 +58,6 @@ func setupVidhub(r *gin.Engine, cfg *config.Config, proxyClient *proxy.Client) {
 		group.POST("/vidbos", middleware.FeatureFlagPlatform("vidhub", "vidbos"), vidbosHandler.Extract)
 		group.POST("/vidarato", middleware.FeatureFlagPlatform("vidhub", "vidarato"), vidaratoHandler.Extract)
 		group.POST("/vidnest", middleware.FeatureFlagPlatform("vidhub", "vidnest"), vidnestHandler.Extract)
+		group.POST("/kingbokeptv", middleware.FeatureFlagPlatform("vidhub", "kingbokeptv"), kingbokeptvHandler.Extract)
 	}
 }
