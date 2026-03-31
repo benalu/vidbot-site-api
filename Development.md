@@ -21,11 +21,10 @@ tail -f /home/ubuntu/vidbot-api-go/logs/out.log
 tail -f /home/ubuntu/vidbot-api-go/logs/error.log
 sudo systemctl status vidbot-api-go
 
-# UNZIP
+# UNZIP leakcheck database
 cd /home/ubuntu/vidbot-api-go/data/leakcheck
 unzip 23Jan26.zip
 rm 23Jan26.zip
-
 ```
 
 ---
@@ -37,10 +36,26 @@ rm 23Jan26.zip
 | Language | Go (gin-gonic) |
 | Cache / State | Redis (Upstash) |
 | Stats Tracking | SQLite (lokal, `data/stats/stats.db`) |
-| Proxy Layer | Cloudflare Workers |
+| Proxy Layer | Cloudflare Workers (3 worker berbeda) |
 | Auth | Time-based HMAC token + API Key |
 | File Conversion | CloudConvert, Convertio |
 | Media Extraction | Downr + Vidown (via CF Worker) |
+| HLS Processing | ffmpeg (pipe stdin→stdout, tidak ada tmp file) |
+| HLS Fallback | yt-dlp (fallback kalau direct HLS gagal) |
+
+---
+
+## Cloudflare Workers
+
+Ada 3 worker dengan peran berbeda — **jangan tertukar**:
+
+| Env Var | Worker | Peran |
+|---|---|---|
+| `WORKER_URLS` | `de1`, `de2` | Scraping halaman (kingbokep, vidarato, videb, dll) via `proxy.Client` |
+| `CONTENT_WORKER_URL` | `xcntnt1` | Content extraction (TikTok, Instagram, dll) via `contentProxyClient` |
+| `DOWNLOAD_WORKER_URL` | `xvdh1` | Generate `server_1` download link — **tidak dipakai untuk scraping** |
+
+`WORKER_URLS` bisa berisi multiple URL dipisah koma — request di-rotate secara random untuk distribusi IP.
 
 ---
 
@@ -135,6 +150,8 @@ vidbot-site-api/
 │  ├─ auth/
 │  │  ├─ handler.go
 │  │  └─ service.go
+│  ├─ health/
+│  │  └─ handler.go               ← health check semua dependencies
 │  ├─ services/
 │  │  ├─ content/
 │  │  │  ├─ instagram/
@@ -183,7 +200,10 @@ vidbot-site-api/
 │  │  ├─ leakcheck/
 │  │  │  └─ handler.go
 │  │  └─ vidhub/
-│  │     ├─ vidarato/
+│  │     ├─ kingbokeptv/           ← HLS site, pakai GenerateServer*HLSURL
+│  │     │  ├─ handler.go
+│  │     │  └─ service.go
+│  │     ├─ vidarato/              ← HLS site (master playlist 2 level), pakai GenerateServer*HLSURL
 │  │     │  ├─ handler.go
 │  │     │  └─ service.go
 │  │     ├─ vidbos/
@@ -200,18 +220,18 @@ vidbot-site-api/
 │  │        ├─ model.go
 │  │        └─ service.go
 │  └─ stream/
-│     └─ handler.go
+│     └─ handler.go               ← HLS progressive download + direct stream
 ├─ middleware/
 │  ├─ api_key.go
 │  ├─ auth.go
-│  ├─ feature.go                  ← feature flag middleware (baru)
+│  ├─ feature.go                  ← feature flag middleware
 │  └─ ratelimit.go
 ├─ pkg/
 │  ├─ apikey/
 │  │  └─ types.go
 │  ├─ cache/
 │  │  ├─ cache.go
-│  │  └─ provider_cache.go        ← in-memory provider priority cache (baru)
+│  │  └─ provider_cache.go        ← in-memory provider priority cache
 │  ├─ cloudconvert/
 │  │  └─ client.go
 │  ├─ convertvalidator/
@@ -219,7 +239,7 @@ vidbot-site-api/
 │  ├─ downloader/
 │  │  ├─ cache.go
 │  │  ├─ detector.go
-│  │  └─ download_url.go
+│  │  └─ download_url.go          ← GenerateServer*URL + GenerateServer*HLSURL + ExtractCDNOrigin
 │  ├─ fileutil/
 │  │  └─ filename.go              ← sanitize filename unified
 │  ├─ httputil/
@@ -229,7 +249,7 @@ vidbot-site-api/
 │  ├─ leakcheck/
 │  │  └─ store.go
 │  ├─ limiter/
-│  │  ├─ global.go
+│  │  ├─ global.go                ← HLSDownload(3), DirectStream(10), cdnMaxPerHost(1)
 │  │  ├─ limiter.go
 │  │  └─ ratelimit.go
 │  ├─ mediaresponse/
@@ -240,6 +260,8 @@ vidbot-site-api/
 │  │  └─ ua.go
 │  ├─ response/
 │  │  └─ response.go
+│  ├─ shortlink/
+│  │  └─ shortlink.go             ← server_2 URL shortener via Redis
 │  ├─ stats/
 │  │  ├─ db.go                    ← SQLite init + query
 │  │  └─ tracker.go               ← async write via buffered channel
@@ -247,10 +269,11 @@ vidbot-site-api/
 │     └─ url.go
 ├─ router/
 │  ├─ router.go                   ← orchestrate only, panggil sub-router
-│  ├─ admin.go                    ← route /admin/* (baru)
+│  ├─ admin.go                    ← route /admin/*
 │  ├─ auth.go                     ← route /auth/*
 │  ├─ content.go                  ← route /content/*
 │  ├─ convert.go                  ← route /convert/*
+│  ├─ health.go                   ← route /health
 │  ├─ iptv.go                     ← route /iptv/*
 │  ├─ leakcheck.go                ← route /leakcheck/*
 │  └─ vidhub.go                   ← route /vidhub/*
@@ -281,6 +304,11 @@ vidbot-site-api/
 |---|---|---|
 | GET | `/auth/verify` | Verifikasi API key + dapat access token |
 | GET | `/auth/quota` | Cek sisa quota API key |
+
+### Health
+| Method | Path | Keterangan |
+|---|---|---|
+| GET | `/health` | Cek status semua dependencies (butuh `X-Master-Key`) |
 
 ### Admin (gunakan Master Key via `X-Master-Key`)
 | Method | Path | Keterangan |
@@ -343,8 +371,9 @@ https://your-domain.com/iptv/playlist?country=ID&key=YOUR_API_KEY
 | POST | `/vidhub/videb` | Ekstrak dari Videb |
 | POST | `/vidhub/vidoy` | Ekstrak dari Vidoy |
 | POST | `/vidhub/vidbos` | Ekstrak dari Vidbos |
-| POST | `/vidhub/vidarato` | Ekstrak dari Vidarato |
+| POST | `/vidhub/vidarato` | Ekstrak dari Vidarato (HLS, master playlist 2 level) |
 | POST | `/vidhub/vidnest` | Ekstrak dari Vidnest |
+| POST | `/vidhub/kingbokeptv` | Ekstrak dari KingBokepTV (HLS, single level) |
 
 ### Convert (butuh API Key + Access Token)
 | Method | Path | Keterangan |
@@ -362,7 +391,7 @@ https://your-domain.com/iptv/playlist?country=ID&key=YOUR_API_KEY
 ### Stream
 | Method | Path | Keterangan |
 |---|---|---|
-| GET | `/dl` | Proxy download stream |
+| GET | `/dl` | Proxy download stream (direct MP4 atau HLS progressive) |
 
 ---
 
@@ -388,7 +417,7 @@ GET /admin/features/convert/audio/disable    → matikan hanya /convert/audio
 | Group | Platform |
 |---|---|
 | `content` | `spotify`, `tiktok`, `instagram`, `twitter`, `threads` |
-| `vidhub` | `videb`, `vidoy`, `vidbos`, `vidarato`, `vidnest` |
+| `vidhub` | `videb`, `vidoy`, `vidbos`, `vidarato`, `vidnest`, `kingbokeptv` |
 | `convert` | `audio`, `document`, `image`, `fonts` |
 | `iptv` | — (group level only) |
 | `leakcheck` | — (group level only) |
@@ -398,6 +427,7 @@ GET /admin/features/convert/audio/disable    → matikan hanya /convert/audio
 ## Stats Tracking
 
 Stats disimpan di SQLite (`data/stats/stats.db`) — tidak di Redis.
+Write dilakukan async via buffered channel (kapasitas 2000) — tidak memblokir request path.
 Setiap request yang lolos rate limit akan di-track via `stats.Platform()` atau `stats.Group()` di handler.
 
 ### Cara Pakai di Handler Baru
@@ -445,11 +475,11 @@ stats.Group(c, "iptv")
 ## Arsitektur Provider
 
 ### Pattern
-Setiap kategori (content, convert, vidhub) menggunakan **provider pattern**:
+Setiap kategori (content, convert) menggunakan **provider pattern**:
 - Interface `Provider` didefinisikan di folder `provider/`
 - Setiap implementasi (downr, cloudconvert, convertio) mengimplementasikan interface
 - Service iterate providers dengan fallback otomatis
-- Urutan provider diambil dari Redis, bukan hardcode
+- Urutan provider diambil dari memory cache (`pkg/cache/provider_cache.go`), sync dari Redis setiap 5 menit
 
 ### Redis Keys — Provider Priority
 ```
@@ -475,6 +505,8 @@ DEL content:provider:tiktok
 RPUSH content:provider:tiktok provider_baru downr
 ```
 
+Perubahan aktif dalam maksimal 5 menit (interval sync provider cache).
+
 ---
 
 ## Redis Keys — Semua Key yang Digunakan
@@ -492,6 +524,8 @@ RPUSH content:provider:tiktok provider_baru downr
 | `vidhub:{site}:{urlHash}` | String (JSON) | Cache response vidhub |
 | `feature:{group}` | String | Status on/off per group |
 | `feature:{group}:{platform}` | String | Status on/off per platform |
+| `sl:{key}` | String (JSON) | Shortlink payload untuk server_2 |
+| `sl:idx:{cacheKey}` | String | Index shortlink → idempoten per URL |
 
 ---
 
@@ -506,7 +540,6 @@ Rate limit diterapkan per endpoint group via middleware `RateLimit`:
 | `/vidhub/*` | 30 req/menit per API key |
 | `/iptv/*` | 60 req/menit per API key |
 | `/leakcheck/*` | 5 req/menit per API key |
-| `/iptv/playlist` | 60 req/menit per API key |
 
 Untuk mengubah limit, edit `endpointLimits` di `pkg/limiter/ratelimit.go`.
 
@@ -527,8 +560,78 @@ Response di-cache di Redis untuk mengurangi hit ke provider eksternal.
 | `vidhub:videb` | 2 jam |
 | `vidhub:vidoy` | 1 jam |
 | `vidhub:vidbos` | 2 jam |
-| `vidhub:vidarato` | 2 jam |
+| `vidhub:vidarato` | 3 menit (token URL expire & IP-bound) |
 | `vidhub:vidnest` | 2 jam |
+| `vidhub:kingbokeptv` | 6 jam |
+
+**Catatan vidarato:** TTL sengaja 3 menit karena `streaming_url` mengandung token yang terikat ke IP client dan expire time. Cache hampir selalu miss — pertimbangkan untuk skip cache di handler vidarato sepenuhnya di masa depan.
+
+---
+
+## Arsitektur HLS Progressive Download
+
+Site yang mengembalikan m3u8 (kingbokeptv, vidarato) diproses via `internal/stream/handler.go` menggunakan arsitektur progressive download.
+
+### Flow
+```
+Client hit /dl?url={shortlink}
+    ↓
+Decode payload → dapat m3u8 URL + CDNOrigin
+    ↓
+getOrCreateSession (share session kalau URL sama)
+    ↓
+runDirectHLS:
+  1. fetchPlaylist → handle master playlist (2 level) + segment playlist (1 level)
+  2. spawn ffmpeg (stdin pipe ← .ts data, stdout pipe → mp4 chunks)
+  3. download .ts segments sequential + jeda 300-800ms (anti throttle)
+  4. pipe ke ffmpeg stdin → ffmpeg mux jadi mp4 fragmented
+  5. baca stdout ffmpeg → append ke session chunks
+    ↓ (fallback kalau direct HLS gagal)
+runYTDLP → output mp4 → append ke session chunks
+    ↓
+Client baca chunks progressive (streaming ke browser/IDM)
+```
+
+### Concurrency Limits
+| Limiter | Nilai | Keterangan |
+|---|---|---|
+| `HLSDownload` | 3 | Max concurrent HLS session baru |
+| `DirectStream` | 10 | Max concurrent direct MP4 relay |
+| `cdnMaxPerHost` | 1 | Max concurrent download ke CDN host yang sama |
+
+### Session Lifecycle
+- Session di-share antar user yang request URL sama (tidak spawn 2 ffmpeg)
+- Limiter `HLSDownload` di-release setelah session done (bukan setelah handler return)
+- Chunks di-free dari memory segera setelah semua reader selesai + download done
+- Grace period 2 menit untuk reader reconnect sebelum session di-cancel
+- Session TTL 10 menit — dihapus dari map setelah expired
+- **Tidak ada tmp file di disk** — semua data mengalir lewat pipe ke memory
+
+### Master Playlist Detection
+`fetchPlaylist` otomatis handle dua struktur berbeda:
+- **1 level** (kingbokeptv): `playlist.m3u8` → langsung berisi segment `.ts`
+- **2 level** (vidarato): `master.m3u8` → berisi `index_608x1080.m3u8` → berisi segment `.ts`
+
+### CDNOrigin
+`CDNOrigin` (scheme + host CDN) di-extract dari m3u8 URL di service, di-embed ke dalam payload terenkripsi server_2, dan dipakai di stream handler untuk set `Origin` dan `Referer` header yang benar saat download segments. Tidak muncul di response JSON.
+
+Untuk site baru yang punya CDN berbeda, tidak perlu update mapping static — CDNOrigin otomatis di-derive dari URL m3u8 yang di-scrape.
+
+### Fungsi Generate URL untuk HLS
+
+Site yang output-nya m3u8 **wajib** pakai fungsi HLS khusus (bukan fungsi regular):
+
+```go
+// ✅ untuk site HLS (kingbokeptv, vidarato, site baru yang m3u8)
+res.Download.Server1 = downloader.GenerateServer1HLSURL(..., result.CDNOrigin)
+res.Download.Server2 = downloader.GenerateServer2HLSURL(..., result.CDNOrigin)
+
+// ✅ untuk site non-HLS (videb, vidoy, vidbos, vidnest, semua content)
+res.Download.Server1 = downloader.GenerateServer1URL(...)
+res.Download.Server2 = downloader.GenerateServer2URL(...)
+```
+
+Perbedaannya: fungsi HLS membawa `CDNOrigin` di dalam payload terenkripsi untuk dipakai stream handler. Fungsi regular tidak.
 
 ---
 
@@ -539,9 +642,10 @@ memanggil sub-router. Tidak ada route yang didefinisikan langsung di sini.
 
 | File | Tanggung Jawab |
 |---|---|
-| `router/router.go` | Inisialisasi providers, proxy client, provider cache, panggil sub-router |
+| `router/router.go` | Inisialisasi providers, proxy client, provider cache, shortlink wiring, panggil sub-router |
 | `router/admin.go` | Route `/admin/*` |
 | `router/auth.go` | Route `/auth/*` |
+| `router/health.go` | Route `/health` |
 | `router/content.go` | Route `/content/*` |
 | `router/vidhub.go` | Route `/vidhub/*` |
 | `router/convert.go` | Route `/convert/*` |
@@ -564,12 +668,35 @@ httputil.WriteJSON(c, http.StatusOK, res) // status custom
 ```
 Mencegah `\u0026` pada URL di dalam response JSON.
 
+**Penting:** Selalu pakai `httputil.WriteJSONOK` atau `httputil.WriteJSON` untuk response yang mengandung URL. Jangan pakai `c.JSON()` atau `response.WriteJSON()` — keduanya melakukan HTML escaping yang merusak URL.
+
 ### `pkg/fileutil` — Sanitize Filename
 ```go
 import "vidbot-api/pkg/fileutil"
 
 filename := fileutil.Sanitize(title) + ".mp4"
 filename := fileutil.SanitizeWithExt(rawName, ext)
+```
+
+### `pkg/downloader` — URL Generation & Cache
+```go
+import "vidbot-api/pkg/downloader"
+
+// untuk site non-HLS
+downloader.GenerateServer1URL(workerURL, secret, xorKey, dlURL, title, filename, filecode, ext, service)
+downloader.GenerateServer2URL(appURL, streamSecret, cacheKey, dlURL, title, filename, filecode, ext, service)
+
+// untuk site HLS (output m3u8)
+downloader.GenerateServer1HLSURL(..., cdnOrigin)
+downloader.GenerateServer2HLSURL(..., cdnOrigin)
+
+// extract CDN origin dari m3u8 URL (dipakai di service.go dan cache hit handler)
+cdnOrigin := downloader.ExtractCDNOrigin(m3u8URL)
+
+// cache
+downloader.CacheGet[T](service, site, rawURL)
+downloader.CacheSet(service, site, rawURL, &data)
+downloader.CacheKey(service, site, rawURL)
 ```
 
 ### `pkg/cache/provider_cache` — Provider Priority Cache
@@ -583,7 +710,6 @@ cache.InitProviderCache([]string{
 // Tidak perlu dipanggil manual di tempat lain
 // ResolveProviderForCategory sudah pakai GetProviderOrder() secara otomatis
 ```
-Provider priority dibaca dari memory, bukan Redis, sehingga tidak ada round-trip Redis per request. Kalau urutan provider diubah di Redis (via `DEL` + `RPUSH`), perubahan akan aktif dalam maksimal 5 menit tanpa restart server.
 
 ### `pkg/stats` — Stats Tracking
 ```go
@@ -641,7 +767,7 @@ stats.Group(c, "iptv")                 // untuk endpoint tanpa platform
    → tambah key "content:provider:cobalt" di slice InitProviderCache
 ```
 
-### Menambah platform vidhub baru (misal: Vidplay)
+### Menambah platform vidhub baru — Non-HLS (misal: Vidplay)
 
 ```
 1. Buat folder baru:
@@ -666,6 +792,50 @@ stats.Group(c, "iptv")                 // untuk endpoint tanpa platform
 
 7. Di handler baru, tambah di baris pertama Extract():
    stats.Platform(c, "vidhub", "vidplay")
+
+8. Gunakan GenerateServer1URL / GenerateServer2URL (bukan versi HLS)
+```
+
+### Menambah platform vidhub baru — HLS/M3U8 (misal: SiteStreamBaru)
+
+```
+1. Buat folder baru:
+   internal/services/vidhub/sitestreambar/
+   ├─ handler.go   ← ikuti pola kingbokeptv/handler.go
+   └─ service.go
+
+2. Di service.go:
+   → Extract m3u8 URL dari halaman
+   → Tambah CDNOrigin di struct Result:
+      CDNOrigin string
+   → Isi di return:
+      CDNOrigin: extractCDNOrigin(m3u8URL)
+   → Tambah fungsi helper:
+      func extractCDNOrigin(m3u8URL string) string {
+          parsed, err := url.Parse(m3u8URL)
+          if err != nil || parsed.Host == "" { return "" }
+          return parsed.Scheme + "://" + parsed.Host
+      }
+
+3. Di handler.go:
+   → Pakai GenerateServer1HLSURL / GenerateServer2HLSURL (bukan versi regular)
+   → Saat cache hit: cdnOrigin := downloader.ExtractCDNOrigin(cached.Download.Original)
+   → Saat build response: JANGAN masukkan CDNOrigin ke VidhubData (tidak perlu, tidak boleh muncul di response)
+
+4. pkg/downloader/cache.go
+   → tambah entry TTL di cacheTTL map
+
+5. router/vidhub.go
+   → tambah handler, route, dan FeatureFlagPlatform
+
+6. cmd/seed/main.go + config/allowed_domains.json
+   → tambah allowed_domains
+
+7. internal/admin/handler.go
+   → tambah ke validPlatforms["vidhub"]
+
+8. Di handler baru, tambah di baris pertama Extract():
+   stats.Platform(c, "vidhub", "sitestreambar")
 ```
 
 ### Menambah format convert baru
@@ -696,15 +866,17 @@ stats.Group(c, "iptv")                 // untuk endpoint tanpa platform
 |---|---|
 | Platform content baru | `content/{nama}/` + `cache.go` + `router/content.go` + `seed` + `allowed_domains.json` + `admin/handler.go` |
 | Provider content baru | `content/provider/{nama}/` + `router/content.go` + `seed` + `router/router.go` (InitProviderCache) |
-| Platform vidhub baru | `vidhub/{nama}/` + `cache.go` + `router/vidhub.go` + `seed` + `allowed_domains.json` + `admin/handler.go` |
+| Platform vidhub baru (non-HLS) | `vidhub/{nama}/` + `cache.go` + `router/vidhub.go` + `seed` + `allowed_domains.json` + `admin/handler.go` |
+| Platform vidhub baru (HLS) | sama seperti non-HLS + pakai `GenerateServer*HLSURL` + `extractCDNOrigin` di service |
 | Format convert baru | `service.go` + `validator.go` + `cloudconvert.go` + `convertio.go` |
 | Provider convert baru | `convert/provider/{nama}/` + `router/convert.go` |
 
 ### Response
-- Selalu gunakan `httputil.WriteJSONOK` — jangan `c.JSON()` untuk response yang mengandung URL
+- Selalu gunakan `httputil.WriteJSONOK` atau `httputil.WriteJSON` — **jangan** `c.JSON()` atau `response.WriteJSON()` untuk response yang mengandung URL
 - Error response selalu via `response.ErrorWithCode(c, status, "CODE", "message")`
 - Cache selalu disimpan **tanpa** `server_1` dan `server_2`
 - Tambah `stats.Platform()` atau `stats.Group()` di baris pertama setiap handler baru
+- Site HLS wajib pakai `GenerateServer*HLSURL`, site non-HLS pakai `GenerateServer*URL`
 
 ---
 
@@ -731,21 +903,34 @@ stats.Group(c, "iptv")                 // untuk endpoint tanpa platform
 | 1 | `/convert/image/upload` validasi pakai `Audio` bukan `Image` | `internal/services/convert/image/handler.go` | ✅ Fixed |
 | 2 | `content:threads` tidak ada di `cacheTTL`, fallback ke 15 menit | `pkg/downloader/cache.go` | ✅ Fixed |
 | 3 | `iptvstore.startRefresh()` tidak dipanggil di `Init()` | `pkg/iptvstore/store.go` | ✅ Fixed |
-| 4 | Goroutine secondary di content service tidak ada context cancellation | `internal/services/content/*/service.go` | 🟡 Low priority |
+| 4 | `deriveOrigin` dead code tidak dipakai | `internal/stream/handler.go` | ✅ Fixed (dihapus) |
+| 5 | Limiter `HLSDownload` di-release terlalu cepat (sebelum session done) | `internal/stream/handler.go` | ✅ Fixed |
+| 6 | Log ffmpeg/yt-dlp terlalu verbose di production | `internal/stream/handler.go` | ✅ Fixed (filter error only) |
+| 7 | Master playlist vidarato tidak di-resolve ke sub-playlist | `internal/stream/handler.go` | ✅ Fixed (`isMasterPlaylist` + `fetchM3U8Body`) |
+| 8 | HLS session chunks tidak di-free setelah selesai (memory leak) | `internal/stream/handler.go` | ✅ Fixed (`freeChunks()`) |
+| 9 | Beberapa vidhub handler pakai `response.WriteJSON` bukan `httputil.WriteJSONOK` | `vidbos`, `videb`, `vidoy`, `vidarato` handler | 🟡 Perlu fix — bisa menyebabkan URL corrupt |
+| 10 | Goroutine secondary di content service tidak ada context cancellation | `internal/services/content/*/service.go` | 🟡 Low priority |
+| 11 | `vidnest/service.go` masih ada timing log verbose | `internal/services/vidhub/vidnest/service.go` | 🟡 Perlu dihapus |
 
 ---
 
 ## Pending / Backlog
 
-- [ ] Health check endpoint (`GET /health`) ✅ Selesai
+- [ ] Fix `response.WriteJSON` → `httputil.WriteJSONOK` di vidbos, videb, vidoy, vidarato handler
+- [ ] Hapus timing log verbose di `vidnest/service.go`
 - [ ] Structured logging ke file
 - [ ] Tier sistem (free, pro, enterprise) untuk rate limit + quota berbeda
 - [ ] Fix ID dan Duration kosong di response TikTok
 - [ ] CF Worker: tambah Referer header untuk Convertio URLs (server_1 masih 403)
 - [ ] Cache hasil convert untuk hemat credits CloudConvert/Convertio
 - [ ] Dokumentasi API publik (Postman collection atau README terpisah)
-- [ ] Provider priority pindah ke memory (kurangi hit Redis) ✅ Selesai
 - [ ] URL versioning `/v1/`
+- [ ] Convertvalidator timeout turun ke 3 detik
+- [ ] Cleanup stats scheduler (hapus data > 90 hari)
+- [ ] Structured logging via slog
+- [ ] Skip cache sepenuhnya untuk vidarato (token IP-bound, 3 menit cache hampir selalu miss)
+- [ ] Health check endpoint (`GET /health`) ✅ Selesai
+- [ ] Provider priority pindah ke memory (kurangi hit Redis) ✅ Selesai
 - [ ] Konsolidasi `writeJSONUnescaped` ke `pkg/httputil` ✅ Selesai
 - [ ] Konsolidasi `sanitizeFilename` ke `pkg/fileutil` ✅ Selesai
 - [ ] Pecah `router/router.go` ke sub-router per grup ✅ Selesai
@@ -756,9 +941,14 @@ stats.Group(c, "iptv")                 // untuk endpoint tanpa platform
 - [ ] IPTV stream format detection (`format` field) ✅ Selesai
 - [ ] gin.ReleaseMode di production ✅ Selesai
 - [ ] Async stats write via buffered channel ✅ Selesai
-- [ ] Convertvalidator timeout turun ke 3 detik
-- [ ] Cleanup stats scheduler (hapus data > 90 hari)
-- [ ] Structured logging via slog
+- [ ] kingbokeptv vidhub endpoint ✅ Selesai
+- [ ] HLS progressive download dengan ffmpeg pipe (no tmp file) ✅ Selesai
+- [ ] Master playlist auto-resolve (support vidarato 2-level HLS) ✅ Selesai
+- [ ] CDNOrigin di payload HLS (tidak muncul di response) ✅ Selesai
+- [ ] HLS session memory leak fix (freeChunks setelah done) ✅ Selesai
+- [ ] HLS limiter leak fix (release setelah session done bukan handler return) ✅ Selesai
+- [ ] Natural delay antar segment HLS (anti throttle 300-800ms) ✅ Selesai
+- [ ] CDN concurrent limiter per host (max 1) ✅ Selesai
 
 ---
 
@@ -782,3 +972,11 @@ stats.Group(c, "iptv")                 // untuk endpoint tanpa platform
 | `gin.ReleaseMode` di production | Matikan debug logging, kurangi I/O overhead di traffic tinggi |
 | Async stats write via buffered channel | Hilangkan SQLite write latency dari request path, stats boleh tidak 100% akurat |
 | Provider priority di memory (`pkg/cache/provider_cache.go`) | Hilangkan Redis round-trip per request, sync dari Redis setiap 5 menit |
+| HLS pipe via ffmpeg stdin/stdout | Tidak ada tmp file di disk, stream langsung ke memory chunks |
+| Session sharing untuk HLS | URL yang sama tidak spawn 2 proses ffmpeg, semua client share chunks yang sama |
+| CDNOrigin di payload HLS terenkripsi | Tidak perlu mapping static di code, otomatis dari URL yang di-scrape, tidak expose di response |
+| `GenerateServer*HLSURL` terpisah dari `GenerateServer*URL` | Site non-HLS tidak terpengaruh saat menambah field CDNOrigin, zero breaking change |
+| `freeChunks()` setelah semua reader done | Bebaskan memory segera, tidak tunggu sessionTTL 10 menit |
+| `cdnMaxPerHost = 1` | Satu concurrent download per CDN host, lebih aman dari throttle |
+| Natural delay 300-800ms antar segment | Simulasi pola browser streaming, kurangi deteksi bot oleh Cloudflare |
+| Vidarato cache TTL 3 menit | Token URL expire dan IP-bound, cache lebih lama tidak berguna |

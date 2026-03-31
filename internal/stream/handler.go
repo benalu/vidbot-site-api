@@ -59,6 +59,12 @@ var (
 	hlsSessionsMu sync.Mutex
 )
 
+func (s *hlsSession) freeChunks() {
+	s.mu.Lock()
+	s.chunks = nil
+	s.mu.Unlock()
+}
+
 // CancelAllSessions — dipanggil saat server shutdown dari main.go
 func CancelAllSessions() {
 	hlsSessionsMu.Lock()
@@ -117,6 +123,7 @@ func getOrCreateSession(cacheKey, m3u8URL, toolsDir string) *hlsSession {
 			hlsSessionsMu.Lock()
 			delete(hlsSessions, cacheKey)
 			hlsSessionsMu.Unlock()
+			sess.freeChunks() // ← tambah ini
 			log.Printf("[progressive] session expired: %s", cacheKey)
 		})
 	}()
@@ -855,11 +862,20 @@ func (h *Handler) streamProgressive(c *gin.Context, payload *downloader.Payload,
 		age := time.Since(sess.lastRead)
 		sess.mu.Unlock()
 
-		if readerCount == 0 && !done {
-			// grace period 2 menit — biarkan session tetap hidup
-			// supaya client reconnect tidak perlu restart dari awal
-			if age < 2*time.Minute {
+		if readerCount == 0 {
+			if done {
+				// semua reader selesai dan download done — free chunks sekarang
+				// tidak perlu tunggu sessionTTL
+				sess.freeChunks()
+				hlsSessionsMu.Lock()
+				delete(hlsSessions, cacheKey)
+				hlsSessionsMu.Unlock()
+				return
+			}
 
+			// download masih jalan tapi semua reader pergi
+			if age < 2*time.Minute {
+				// grace period — biarkan hidup kalau session masih muda
 				return
 			}
 			log.Printf("[progressive] all readers gone after %v, cancelling: %s", age, cacheKey)
@@ -869,6 +885,7 @@ func (h *Handler) streamProgressive(c *gin.Context, payload *downloader.Payload,
 			hlsSessionsMu.Lock()
 			delete(hlsSessions, cacheKey)
 			hlsSessionsMu.Unlock()
+			sess.freeChunks()
 		}
 	}()
 
