@@ -15,7 +15,7 @@ git pull                  # ambil perubahan terbaru (kalau kerja di beberapa mes
 ```bash
 git status                # cek file apa yang berubah
 git add .                 # staging semua perubahan
-git commit                # tulis commit message (hook akan muncul sebagai reminder)
+git commit -m "fix: something"              # tulis commit message (hook akan muncul sebagai reminder)
 ```
 
 ### Selesai kerja — JANGAN LUPA

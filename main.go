@@ -6,10 +6,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 	"vidbot-api/config"
 	"vidbot-api/internal/stream"
+	"vidbot-api/pkg/appstore"
 	"vidbot-api/pkg/cache"
 	"vidbot-api/pkg/downloader"
 	"vidbot-api/pkg/leakcheck"
@@ -26,12 +28,15 @@ func main() {
 
 	cache.Init(cfg.RedisURL)
 
-	leakcheckDir := cfg.LeakcheckDir
-	if leakcheckDir == "" {
-		leakcheckDir = "data/leakcheck"
+	dataDir := cfg.DataDir
+	if dataDir == "" {
+		dataDir = "data"
 	}
-	if err := leakcheck.Default.Init(leakcheckDir); err != nil {
+	if err := leakcheck.Default.Init(filepath.Join(dataDir, "leakcheck")); err != nil {
 		log.Printf("[leakcheck] init error: %v", err)
+	}
+	if err := appstore.Init(filepath.Join(dataDir, "app")); err != nil {
+		log.Printf("[appstore] init error: %v", err)
 	}
 
 	if err := stats.Init("data/stats/stats.db"); err != nil {

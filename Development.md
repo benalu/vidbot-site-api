@@ -36,6 +36,7 @@ rm 23Jan26.zip
 | Language | Go (gin-gonic) |
 | Cache / State | Redis (Upstash) |
 | Stats Tracking | SQLite (lokal, `data/stats/stats.db`) |
+| App Store | SQLite per platform (lokal, `data/app/{platform}.db`) |
 | Proxy Layer | Cloudflare Workers (3 worker berbeda) |
 | Auth | Time-based HMAC token + API Key |
 | File Conversion | CloudConvert, Convertio |
@@ -97,6 +98,7 @@ WORKER_PAYLOAD_XOR_KEY=...
 
 # App
 APP_URL=http://localhost:8000
+DATA_DIR=./data
 
 # Convert Providers
 CLOUDCONVERT_API_KEY=...
@@ -199,6 +201,9 @@ vidbot-site-api/
 │  │  │  └─ handler.go
 │  │  ├─ leakcheck/
 │  │  │  └─ handler.go
+│  │  ├─ app/
+│  │  │  ├─ handler.go        ← SearchAndroid, SearchWindows, Download
+│  │  │  └─ admin_handler.go  ← AdminAdd, AdminBulkAdd, AdminList, AdminDelete, AdminDeleteVersion
 │  │  └─ vidhub/
 │  │     ├─ kingbokeptv/           ← HLS site, pakai GenerateServer*HLSURL
 │  │     │  ├─ handler.go
@@ -248,6 +253,9 @@ vidbot-site-api/
 │  │  └─ store.go
 │  ├─ leakcheck/
 │  │  └─ store.go
+│  ├─ appstore/
+│  │  ├─ db.go               ← SQLite per platform, FTS5, write+read DB terpisah
+│  │  └─ shortlink.go        ← mask/resolve raw URL via Redis (prefix app:sl:)
 │  ├─ limiter/
 │  │  ├─ global.go                ← HLSDownload(3), DirectStream(10), cdnMaxPerHost(1)
 │  │  ├─ limiter.go
@@ -276,6 +284,7 @@ vidbot-site-api/
 │  ├─ health.go                   ← route /health
 │  ├─ iptv.go                     ← route /iptv/*
 │  ├─ leakcheck.go                ← route /leakcheck/*
+│  ├─ app.go                      ← route /app/* dan /admin/app/*
 │  └─ vidhub.go                   ← route /vidhub/*
 ├─ test/
 │  ├─ TestNih.jpg
@@ -393,6 +402,52 @@ https://your-domain.com/iptv/playlist?country=ID&key=YOUR_API_KEY
 |---|---|---|
 | GET | `/dl` | Proxy download stream (direct MP4 atau HLS progressive) |
 
+### App (butuh API Key + Access Token)
+| Method | Path | Keterangan |
+|---|---|---|
+| POST | `/app/android` | Cari APK Android (keyword via `apk`) |
+| POST | `/app/windows` | Cari software Windows (keyword via `app`) |
+| GET | `/app/dl?k={key}` | Redirect ke raw URL via shortlink — **tidak butuh auth** |
+
+#### Request body
+```json
+// android
+{"apk": "classical music"}
+
+// windows
+{"app": "Internet Download Manager"}
+```
+Keyword wajib diisi, minimal 3 karakter. Menggunakan FTS5 dengan fallback LIKE.
+
+### Admin App (gunakan Master Key via `X-Master-Key`)
+| Method | Path | Keterangan |
+|---|---|---|
+| GET | `/admin/app/:platform/list` | List semua app (`?q=keyword` opsional) |
+| POST | `/admin/app/:platform/add` | Tambah satu entry |
+| POST | `/admin/app/:platform/bulk` | Tambah banyak entry (max 200) |
+| DELETE | `/admin/app/:platform/:slug` | Hapus app beserta semua versinya |
+| DELETE | `/admin/app/:platform/version/:id` | Hapus satu versi download |
+
+`:platform` yang valid: `android`, `windows`
+
+### App (butuh API Key + Access Token)
+| Method | Path | Keterangan |
+|---|---|---|
+| POST | `/app/android` | Cari app Android (keyword via `apk`) |
+| POST | `/app/windows` | Cari app Windows (keyword via `app`) |
+| GET | `/app/dl?k={key}` | Redirect ke raw URL via shortlink — tidak butuh auth |
+
+### Admin App (gunakan Master Key via `X-Master-Key`)
+| Method | Path | Keterangan |
+|---|---|---|
+| GET | `/admin/app/{platform}/list` | List semua app platform tertentu (`?q=keyword`) |
+| POST | `/admin/app/{platform}/add` | Tambah satu entry |
+| POST | `/admin/app/{platform}/bulk` | Tambah banyak entry (maks 200) |
+| DELETE | `/admin/app/{platform}/{slug}` | Hapus app beserta semua versinya |
+| DELETE | `/admin/app/{platform}/version/{id}` | Hapus satu versi download |
+
+Platform yang tersedia: `android`, `windows`
+
 ---
 
 ## Feature Flags
@@ -419,8 +474,10 @@ GET /admin/features/convert/audio/disable    → matikan hanya /convert/audio
 | `content` | `spotify`, `tiktok`, `instagram`, `twitter`, `threads` |
 | `vidhub` | `videb`, `vidoy`, `vidbos`, `vidarato`, `vidnest`, `kingbokeptv` |
 | `convert` | `audio`, `document`, `image`, `fonts` |
+| `app` | `android`, `windows` |
 | `iptv` | — (group level only) |
 | `leakcheck` | — (group level only) |
+| `app` | `android`, `windows` |
 
 ---
 
@@ -540,6 +597,7 @@ Rate limit diterapkan per endpoint group via middleware `RateLimit`:
 | `/vidhub/*` | 30 req/menit per API key |
 | `/iptv/*` | 60 req/menit per API key |
 | `/leakcheck/*` | 5 req/menit per API key |
+| `/app/*` | 30 req/menit per API key |
 
 Untuk mengubah limit, edit `endpointLimits` di `pkg/limiter/ratelimit.go`.
 
@@ -860,7 +918,27 @@ stats.Group(c, "iptv")                 // untuk endpoint tanpa platform
    → tambah ke slice convertProviders
 ```
 
-### Cheatsheet ringkas
+### Menambah platform app baru (misal: macOS)
+
+```
+1. Tambah di validPlatforms di pkg/appstore/db.go:
+   "macos": true,
+
+2. pkg/appstore/db.go — Init() otomatis buat macos.db saat server start
+
+3. internal/services/app/handler.go
+   → tambah SearchMacOS() ikuti pola SearchAndroid/SearchWindows
+
+4. router/app.go
+   → tambah route POST /app/macos + FeatureFlagPlatform("app", "macos")
+
+5. internal/admin/handler.go
+   → tambah "macos" ke validPlatforms["app"]
+
+6. pkg/limiter/ratelimit.go — tidak perlu diubah, sudah pakai group "app"
+```
+
+### Cheatsheet ringkas (update)
 
 | Skenario | File yang disentuh |
 |---|---|
@@ -870,6 +948,7 @@ stats.Group(c, "iptv")                 // untuk endpoint tanpa platform
 | Platform vidhub baru (HLS) | sama seperti non-HLS + pakai `GenerateServer*HLSURL` + `extractCDNOrigin` di service |
 | Format convert baru | `service.go` + `validator.go` + `cloudconvert.go` + `convertio.go` |
 | Provider convert baru | `convert/provider/{nama}/` + `router/convert.go` |
+| Platform app baru (misal macOS) | `validPlatforms` di `db.go` + handler baru + `router/app.go` + `admin/handler.go` |
 
 ### Response
 - Selalu gunakan `httputil.WriteJSONOK` atau `httputil.WriteJSON` — **jangan** `c.JSON()` atau `response.WriteJSON()` untuk response yang mengandung URL
@@ -896,7 +975,80 @@ stats.Group(c, "iptv")                 // untuk endpoint tanpa platform
 
 ---
 
-## Known Bugs & Status
+## App Store
+
+### Overview
+Module untuk menyimpan dan mencari APK/software modded.
+Data disimpan di SQLite terpisah per platform (`data/app/{platform}.db`).
+Raw URL download di-mask via Redis shortlink (TTL 72 jam, auto-refresh saat di-search).
+Pencarian menggunakan FTS5 dengan fallback LIKE.
+
+### Struktur Data
+```
+data/
+└─ app/
+   ├─ android.db    ← apps + app_downloads + apps_fts (FTS5)
+   └─ windows.db    ← sama, terpisah per platform
+```
+
+### File yang Terlibat
+```
+pkg/appstore/
+├─ db.go         ← SQLite store: Init, Search, SearchAll, Upsert, Delete, DeleteVersion
+└─ shortlink.go  ← MaskURL / ResolveURL via Redis (prefix app:sl:)
+
+internal/services/app/
+├─ handler.go        ← SearchAndroid, SearchWindows, Download
+└─ admin_handler.go  ← AdminAdd, AdminBulkAdd, AdminList, AdminDelete, AdminDeleteVersion
+
+router/app.go        ← sub-router /app/* dan /admin/app/*
+```
+
+### Konvensi
+- Keyword wajib diisi minimal 3 karakter di public endpoint — tolak kalau kosong
+- Admin list (`/admin/app/{platform}/list`) boleh tanpa keyword — pakai `SearchAll`
+- Platform diambil dari URL param `/:platform` — bukan dari body
+- `normPlatform` harus return error 400 kalau platform tidak valid, jangan silent fallback ke android
+- FTS5 dengan `LIMIT 50` — jangan query tanpa limit
+- N+1 query `getDownloads` — perlu diganti JOIN atau `IN (...)` saat data sudah besar
+
+### Known Issues & Backlog Appstore
+| # | Issue | Priority |
+|---|---|---|
+| A1 | `SetMaxOpenConns(1)` untuk semua operasi — pisahkan read/write pool | 🔴 High |
+| A2 | N+1 query `getDownloads` per app — ganti ke single JOIN query | 🔴 High |
+| A3 | `hashKey` di shortlink.go pakai XOR fold — collision-prone, ganti ke sha256 | 🔴 High |
+| A4 | `normPlatform` silent fallback ke android — harus return 400 kalau invalid | 🟡 Medium |
+| A5 | Shortlink TTL 72 jam terlalu pendek untuk URL statis APK/EXE | 🟡 Medium |
+| A6 | `SearchAll` tanpa pagination — OOM risk saat data ribuan | 🟡 Medium |
+| A7 | `migrateDB` multiple statement dalam satu Exec — pisah per statement | 🟡 Medium |
+| A8 | Tidak ada `rows.Err()` check setelah loop di semua fungsi query | 🟡 Medium |
+| A9 | FTS query tanpa LIMIT — tambah `LIMIT 50` | 🟡 Medium |
+| A10 | Tidak ada WAL checkpoint berkala — WAL file bisa tumbuh tak terbatas | 🟡 Medium |
+| A11 | Tidak ada FTS AFTER UPDATE trigger — kalau ada edit nama, index stale | 🟡 Medium |
+| A12 | `toSlug` tidak handle collision — dua nama bisa generate slug sama | 🟡 Medium |
+| A13 | `validPlatforms` hardcoded — tambah platform baru butuh rebuild | 🟢 Low |
+| A14 | Tidak ada `stats.Platform` di admin add/bulk | 🟢 Low |
+| A15 | Tidak ada mekanisme bulk import massal (>200) dengan batch FTS rebuild | 🟢 Low |
+
+### Menambah Platform App Baru (misal: macOS)
+```
+1. pkg/appstore/db.go
+   → tambah "macos": true di validPlatforms
+
+2. router/app.go
+   → tambah route POST /app/macos + handler SearchMacOS
+
+3. internal/services/app/handler.go
+   → tambah func SearchMacOS
+
+4. internal/admin/handler.go
+   → tambah "macos" ke validPlatforms["app"]
+
+5. pkg/limiter/ratelimit.go — tidak perlu, sudah pakai group "app"
+```
+
+---
 
 | # | Bug | File | Status |
 |---|---|---|---|
@@ -911,6 +1063,18 @@ stats.Group(c, "iptv")                 // untuk endpoint tanpa platform
 | 9 | Beberapa vidhub handler pakai `response.WriteJSON` bukan `httputil.WriteJSONOK` | `vidbos`, `videb`, `vidoy`, `vidarato` handler | 🟡 Perlu fix — bisa menyebabkan URL corrupt |
 | 10 | Goroutine secondary di content service tidak ada context cancellation | `internal/services/content/*/service.go` | 🟡 Low priority |
 | 11 | `vidnest/service.go` masih ada timing log verbose | `internal/services/vidhub/vidnest/service.go` | 🟡 Perlu dihapus |
+| 12 | `appstore` — `SetMaxOpenConns(1)` untuk read — antri kalau banyak concurrent search | `pkg/appstore/db.go` | 🔴 Perlu pisah writeDB + readDB |
+| 13 | `appstore` — tidak ada `PRAGMA foreign_keys=ON` → CASCADE delete tidak jalan | `pkg/appstore/db.go` | 🔴 Perlu fix |
+| 14 | `appstore` — `Upsert` tidak dalam transaksi → bisa partial insert (app tanpa download) | `pkg/appstore/db.go` | 🔴 Perlu fix |
+| 15 | `appstore` — `toSlug` tidak handle collision → UNIQUE constraint error kalau slug sama | `pkg/appstore/db.go` | 🟡 Perlu fallback append angka |
+| 16 | `appstore` — tidak ada trigger `apps_au` (after update) → FTS index stale kalau data diedit | `pkg/appstore/db.go` | 🟡 Perlu ditambah |
+| 17 | `appstore` — `migrateDB` semua DDL dalam satu `Exec` → bisa silent fail di modernc | `pkg/appstore/db.go` | 🟡 Pisah per statement |
+| 18 | `appstore` — shortlink `hashKey` pakai XOR fold → collision rate tinggi untuk ribuan URL | `pkg/appstore/shortlink.go` | 🟡 Ganti sha256 |
+| 19 | `appstore` — shortlink TTL 72 jam terlalu pendek untuk URL statis | `pkg/appstore/shortlink.go` | 🟡 Naikkan ke 30 hari |
+| 20 | `appstore` — `SearchAll` tanpa LIMIT → bisa block koneksi untuk ribuan data | `pkg/appstore/db.go` | 🟡 Tambah pagination |
+| 21 | `appstore` — route `DELETE /:platform/:slug` vs `/:platform/version/:id` rawan konflik di gin | `router/app.go` | 🟡 Pisah prefix |
+| 22 | `appstore` — `normPlatform` fallback diam-diam ke android kalau platform tidak valid | `internal/services/app/admin_handler.go` | 🟡 Return 400 error |
+| 23 | `appstore` — tidak ada `mmap_size` PRAGMA → read performance tidak optimal | `pkg/appstore/db.go` | 🟡 Tambah 256MB |
 
 ---
 
@@ -918,6 +1082,19 @@ stats.Group(c, "iptv")                 // untuk endpoint tanpa platform
 
 - [ ] Fix `response.WriteJSON` → `httputil.WriteJSONOK` di vidbos, videb, vidoy, vidarato handler
 - [ ] Hapus timing log verbose di `vidnest/service.go`
+- [ ] [appstore] Pisah writeDB + readDB di `pkg/appstore/db.go` (sama seperti leakcheck)
+- [ ] [appstore] Tambah `PRAGMA foreign_keys=ON` agar CASCADE delete jalan
+- [ ] [appstore] Bungkus `Upsert` dalam transaksi (insert app + version atomik)
+- [ ] [appstore] Fix `toSlug` collision — fallback append angka kalau slug sudah ada
+- [ ] [appstore] Tambah trigger `apps_au` (after update) untuk FTS consistency
+- [ ] [appstore] Pisah DDL per `Exec` di `migrateDB`
+- [ ] [appstore] Ganti `hashKey` XOR fold → sha256 di `shortlink.go`
+- [ ] [appstore] Naikkan shortlink TTL dari 72 jam ke 30 hari
+- [ ] [appstore] Tambah pagination di `SearchAll` untuk admin list
+- [ ] [appstore] Fix route konflik `/:platform/:slug` vs `/:platform/version/:id`
+- [ ] [appstore] `normPlatform` return 400 kalau platform tidak valid, bukan silent fallback
+- [ ] [appstore] Tambah `PRAGMA mmap_size=268435456` untuk read performance
+- [ ] [appstore] Tambah `LIMIT` di FTS query (default 20) + info pagination di response
 - [ ] Structured logging ke file
 - [ ] Tier sistem (free, pro, enterprise) untuk rate limit + quota berbeda
 - [ ] Fix ID dan Duration kosong di response TikTok
@@ -980,3 +1157,9 @@ stats.Group(c, "iptv")                 // untuk endpoint tanpa platform
 | `cdnMaxPerHost = 1` | Satu concurrent download per CDN host, lebih aman dari throttle |
 | Natural delay 300-800ms antar segment | Simulasi pola browser streaming, kurangi deteksi bot oleh Cloudflare |
 | Vidarato cache TTL 3 menit | Token URL expire dan IP-bound, cache lebih lama tidak berguna |
+| DB SQLite terpisah per platform (android.db, windows.db) | Isolasi data, query tidak perlu filter platform, mudah backup per platform |
+| FTS5 untuk search app dengan fallback LIKE | Performa jauh lebih baik untuk ribuan data, fallback jaga kompatibilitas DB lama |
+| Shortlink app pakai prefix `app:sl:` terpisah dari `sl:` | Hindari collision dengan shortlink video, TTL dan payload berbeda |
+| Keyword wajib minimal 3 karakter di `/app/*` | Cegah full-scan query yang membebani DB untuk ribuan data |
+| `SearchAll` tanpa keyword hanya untuk admin | Public endpoint wajib pakai keyword — admin boleh list semua untuk maintenance |
+| `DATA_DIR` menggantikan `LEAKCHECK_DIR` di config | Universal untuk semua module DB (leakcheck, stats, appstore), tidak perlu env var baru per module |

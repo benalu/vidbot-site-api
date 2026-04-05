@@ -275,12 +275,14 @@ var validGroups = map[string]bool{
 	"iptv":      true,
 	"vidhub":    true,
 	"leakcheck": true,
+	"app":       true,
 }
 
 var validPlatforms = map[string][]string{
 	"content": {"spotify", "tiktok", "instagram", "twitter", "threads"},
 	"vidhub":  {"videb", "vidoy", "vidbos", "vidarato", "vidnest", "kingbokeptv"},
 	"convert": {"audio", "document", "image", "fonts"},
+	"app":     {"android", "windows"},
 }
 
 func isValidPlatform(group, platform string) bool {
