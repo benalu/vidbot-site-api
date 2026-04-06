@@ -20,7 +20,12 @@ func setupApp(r *gin.Engine, cfg *config.Config) {
 	)
 	{
 		appGroup.POST("/android", middleware.FeatureFlagPlatform("app", "android"), h.SearchAndroid)
+		appGroup.GET("/android/category", middleware.FeatureFlagPlatform("app", "android"), h.CategoriesAndroid)
+		appGroup.GET("/android/category/:category", middleware.FeatureFlagPlatform("app", "android"), h.BrowseAndroid)
 		appGroup.POST("/windows", middleware.FeatureFlagPlatform("app", "windows"), h.SearchWindows)
+		appGroup.GET("/windows/category", middleware.FeatureFlagPlatform("app", "windows"), h.CategoriesWindows)
+		appGroup.GET("/windows/category/:category", middleware.FeatureFlagPlatform("app", "windows"), h.BrowseWindows)
+
 	}
 
 	// ── Download redirect ─────────────────────────────────────────────────────

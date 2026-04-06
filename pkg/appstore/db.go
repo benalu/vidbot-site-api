@@ -227,7 +227,7 @@ func Search(platform, keyword string) ([]App, error) {
 	}
 	defer rows.Close()
 
-	var apps []App
+	apps := make([]App, 0)
 	for rows.Next() {
 		var a App
 		if err := rows.Scan(&a.ID, &a.Slug, &a.Name, &a.Category, &a.Overview, &a.Requirements, &a.Image, &a.CreatedAt); err != nil {
@@ -274,7 +274,7 @@ func SearchAll(platform string, limit, offset int) ([]App, int, error) {
 	}
 	defer rows.Close()
 
-	var apps []App
+	apps := make([]App, 0)
 	for rows.Next() {
 		var a App
 		if err := rows.Scan(&a.ID, &a.Slug, &a.Name, &a.Category, &a.Overview, &a.Requirements, &a.Image, &a.CreatedAt); err != nil {
@@ -299,6 +299,91 @@ func SearchAll(platform string, limit, offset int) ([]App, int, error) {
 		apps[i].Downloads = dlMap[apps[i].ID]
 	}
 	return apps, total, nil
+}
+
+// SearchByCategory — browse app berdasarkan category, dengan pagination
+func SearchByCategory(platform, category string, limit, offset int) ([]App, int, error) {
+	db, err := getReadDB(platform)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	cat := normalizeCategory(category)
+
+	var total int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM apps WHERE category = ?`, cat).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("searchbycategory: count: %w", err)
+	}
+
+	rows, err := db.Query(`
+		SELECT id, slug, name, category, overview, requirements, image, created_at
+		FROM apps WHERE category = ?
+		ORDER BY name ASC LIMIT ? OFFSET ?
+	`, cat, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	apps := make([]App, 0)
+	for rows.Next() {
+		var a App
+		if err := rows.Scan(&a.ID, &a.Slug, &a.Name, &a.Category,
+			&a.Overview, &a.Requirements, &a.Image, &a.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+		apps = append(apps, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	ids := make([]int64, len(apps))
+	for i, a := range apps {
+		ids[i] = a.ID
+	}
+	dlMap, err := batchGetDownloads(db, ids)
+	if err != nil {
+		return nil, 0, err
+	}
+	for i := range apps {
+		apps[i].Downloads = dlMap[apps[i].ID]
+	}
+	return apps, total, nil
+}
+
+// GetCategories — ambil semua category beserta jumlah app-nya
+func GetCategories(platform string) ([]CategoryCount, error) {
+	db, err := getReadDB(platform)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := db.Query(`
+		SELECT category, COUNT(*) as count
+		FROM apps
+		GROUP BY category
+		ORDER BY category ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make([]CategoryCount, 0)
+	for rows.Next() {
+		var c CategoryCount
+		if err := rows.Scan(&c.Category, &c.Count); err != nil {
+			return nil, err
+		}
+		result = append(result, c)
+	}
+	return result, rows.Err()
+}
+
+type CategoryCount struct {
+	Category string `json:"category"`
+	Count    int    `json:"count"`
 }
 
 func sanitizeFTS(q string) string {
@@ -432,6 +517,9 @@ func Upsert(platform string, e UpsertEntry) (UpsertResult, error) {
 		return UpsertResult{Slug: existingSlug, Name: e.Name, Action: "duplicate", Version: e.Version, Duplicate: true}, nil
 	}
 
+	if _, err := tx.Exec(`UPDATE apps SET image = ? WHERE id = ?`, e.Image, appID); err != nil {
+		return UpsertResult{}, fmt.Errorf("update image: %w", err)
+	}
 	if err := insertVersionTx(tx, appID, e.Version, e.Variant, e.RawURL); err != nil {
 		return UpsertResult{}, err
 	}
@@ -508,6 +596,10 @@ func BulkUpsert(platform string, entries []UpsertEntry) ([]UpsertResult, map[int
 		).Scan(&versionExists)
 		if versionExists > 0 {
 			results = append(results, UpsertResult{Slug: existingSlug, Name: e.Name, Action: "duplicate", Version: e.Version, Duplicate: true})
+			continue
+		}
+		if _, uErr := tx.Exec(`UPDATE apps SET image = ? WHERE id = ?`, e.Image, appID); uErr != nil {
+			errs[i] = fmt.Errorf("update image: %w", uErr)
 			continue
 		}
 		if vErr := insertVersionTx(tx, appID, e.Version, e.Variant, e.RawURL); vErr != nil {
