@@ -31,3 +31,4 @@ ecnrypt_worker.py
 test.http
 prepare-commit-msg
 vidbot-api
+deploy.sh

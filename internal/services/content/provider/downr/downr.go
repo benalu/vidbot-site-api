@@ -44,7 +44,7 @@ func (d *Downr) Extract(url string) (*provider.MediaResult, error) {
 }
 
 func (d *Downr) getSessionCookieFromWorker(workerURL string) (string, error) {
-	analyticsURL := "https://downr.cc/.netlify/functions/analytics"
+	analyticsURL := "https://downr.org/.netlify/functions/analytics"
 	ua := proxy.RandomUA()
 	headers := getDownrHeaders(ua, "")
 
@@ -70,7 +70,7 @@ func (d *Downr) getSessionCookieFromWorker(workerURL string) (string, error) {
 }
 
 func (d *Downr) requestVideoInfoFromWorker(workerURL, url, sessionCookie string) (map[string]interface{}, error) {
-	nytURL := "https://downr.cc/.netlify/functions/nyt"
+	nytURL := "https://downr.org/.netlify/functions/nyt"
 	ua := proxy.RandomUA()
 	headers := getDownrHeaders(ua, sessionCookie)
 
@@ -228,8 +228,8 @@ func getDownrHeaders(ua, sessionCookie string) map[string]string {
 		"User-Agent":      ua,
 		"Accept":          "*/*",
 		"Accept-Language": "en-US,en;q=0.9",
-		"Origin":          "https://downr.cc",
-		"Referer":         "https://downr.cc/",
+		"Origin":          "https://downr.org",
+		"Referer":         "https://downr.org/",
 		"Sec-Fetch-Dest":  "empty",
 		"Sec-Fetch-Mode":  "cors",
 		"Sec-Fetch-Site":  "same-origin",
