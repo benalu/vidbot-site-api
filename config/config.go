@@ -29,6 +29,9 @@ type Config struct {
 	CloudConvertAPIKey   string
 	ConvertioAPIKey      string
 	DataDir              string
+	// CDN stor.co.id
+	CDNAPIKey   string
+	CDNFolderID string // folder ID Android/Windows
 }
 
 func Load() *Config {
@@ -67,6 +70,8 @@ func Load() *Config {
 		CloudConvertAPIKey:   os.Getenv("CLOUDCONVERT_API_KEY"),
 		ConvertioAPIKey:      os.Getenv("CONVERTIO_API_KEY"),
 		DataDir:              getEnvDefault("DATA_DIR", "./data"),
+		CDNAPIKey:            os.Getenv("CDN_API_KEY"),
+		CDNFolderID:          os.Getenv("CDN_FOLDER_ID"),
 	}
 }
 

@@ -44,7 +44,6 @@ func IsValidPlatform(platform string) bool {
 	return validPlatforms[platform]
 }
 
-// Init membuka koneksi SQLite dan membuat tabel jika belum ada.
 func Init(dir string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("appstore: mkdir: %w", err)
@@ -52,7 +51,6 @@ func Init(dir string) error {
 	for platform := range validPlatforms {
 		path := filepath.Join(dir, platform+".db")
 
-		// Write connection
 		writeDB, err := sql.Open("sqlite", path)
 		if err != nil {
 			return fmt.Errorf("appstore: open writeDB %s: %w", platform, err)
@@ -72,12 +70,10 @@ func Init(dir string) error {
 			}
 		}
 
-		// Migrate — buat tabel + index + trigger kalau belum ada
 		if err := migrateDB(writeDB); err != nil {
 			return fmt.Errorf("appstore: migrate %s: %w", platform, err)
 		}
 
-		// Read connection
 		readDB, err := sql.Open("sqlite", path)
 		if err != nil {
 			return fmt.Errorf("appstore: open readDB %s: %w", platform, err)
@@ -98,9 +94,8 @@ func Init(dir string) error {
 
 		dbs[platform] = &platformDB{write: writeDB, read: readDB}
 
-		var appCount, dlCount int
+		var appCount int
 		readDB.QueryRow(`SELECT COUNT(*) FROM apps`).Scan(&appCount)
-		readDB.QueryRow(`SELECT COUNT(*) FROM app_downloads`).Scan(&dlCount)
 		wDB := writeDB
 		pName := platform
 		go func() {
@@ -112,13 +107,14 @@ func Init(dir string) error {
 				}
 			}
 		}()
-		log.Printf("[appstore] %s.db ready — %d apps, %d downloads", platform, appCount, dlCount)
+		log.Printf("[appstore] %s.db ready — %d apps", platform, appCount)
 	}
 	return nil
 }
 
 func migrateDB(db *sql.DB) error {
 	stmts := []string{
+		// ─── Apps table — metadata only, no URL ──────────────────────────────
 		`CREATE TABLE IF NOT EXISTS apps (
 			id           INTEGER PRIMARY KEY AUTOINCREMENT,
 			slug         TEXT    NOT NULL UNIQUE,
@@ -129,14 +125,19 @@ func migrateDB(db *sql.DB) error {
 			image        TEXT    NOT NULL DEFAULT '',
 			created_at   TEXT    NOT NULL
 		)`,
-		`CREATE TABLE IF NOT EXISTS app_downloads (
-            id      INTEGER PRIMARY KEY AUTOINCREMENT,
-            app_id  INTEGER NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
-            version TEXT    NOT NULL,
-			variant TEXT    NOT NULL DEFAULT '',
-            raw_url TEXT    NOT NULL,
-            UNIQUE(app_id, version, variant)
-        )`,
+		// ─── Versions table — hanya version string, tidak ada URL ─────────────
+		// version: string versi (misal "4.3.1")
+		// cdn_query: keyword yang dipakai saat search ke CDN (default = nama app)
+		//            berguna kalau nama file di CDN berbeda dari nama app
+		`CREATE TABLE IF NOT EXISTS app_versions (
+			id         INTEGER PRIMARY KEY AUTOINCREMENT,
+			app_id     INTEGER NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+			version    TEXT    NOT NULL,
+			cdn_query  TEXT    NOT NULL DEFAULT '',
+			created_at TEXT    NOT NULL,
+			UNIQUE(app_id, version)
+		)`,
+		// ─── FTS ─────────────────────────────────────────────────────────────
 		`CREATE VIRTUAL TABLE IF NOT EXISTS apps_fts
          USING fts5(name, category, slug, content='apps', content_rowid='id')`,
 		`CREATE TRIGGER IF NOT EXISTS apps_ai AFTER INSERT ON apps BEGIN
@@ -153,9 +154,9 @@ func migrateDB(db *sql.DB) error {
             INSERT INTO apps_fts(rowid, name, category, slug)
             VALUES (new.id, new.name, new.category, new.slug);
          END`,
-		`CREATE INDEX IF NOT EXISTS idx_apps_category ON apps(category)`,
-		`CREATE INDEX IF NOT EXISTS idx_apps_slug     ON apps(slug)`,
-		`CREATE INDEX IF NOT EXISTS idx_dl_app_id     ON app_downloads(app_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_apps_category   ON apps(category)`,
+		`CREATE INDEX IF NOT EXISTS idx_apps_slug        ON apps(slug)`,
+		`CREATE INDEX IF NOT EXISTS idx_appver_app_id    ON app_versions(app_id)`,
 	}
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {
@@ -165,7 +166,7 @@ func migrateDB(db *sql.DB) error {
 	return nil
 }
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 type App struct {
 	ID           int64
@@ -176,51 +177,46 @@ type App struct {
 	Requirements string
 	Image        string
 	CreatedAt    string
-	Downloads    []Download
+	Versions     []AppVersion
 }
 
-type Download struct {
-	ID      int64
-	AppID   int64
-	Version string
-	Variant string
-	RawURL  string
+// AppVersion — hanya metadata versi, URL datang dari CDN resolver
+type AppVersion struct {
+	ID        int64
+	AppID     int64
+	Version   string
+	CDNQuery  string // override keyword pencarian CDN, kosong = pakai nama app
+	CreatedAt string
 }
 
 // ─── Read ─────────────────────────────────────────────────────────────────────
 
-// Search mencari apps berdasarkan platform dan kata kunci (nama / slug / kategori).
-// keyword boleh kosong → return semua platform tersebut.
 func Search(platform, keyword string) ([]App, error) {
 	db, err := getReadDB(platform)
 	if err != nil {
 		return nil, err
 	}
-
-	// keyword wajib diisi — validasi sudah di handler, ini safety net
 	if strings.TrimSpace(keyword) == "" {
 		return nil, fmt.Errorf("keyword tidak boleh kosong")
 	}
 
 	ftsQuery := sanitizeFTS(keyword) + "*"
 	rows, err := db.Query(`
-    SELECT a.id, a.slug, a.name, a.category, a.overview, a.requirements, a.image, a.created_at
-    FROM apps_fts f
-    JOIN apps a ON a.id = f.rowid
-    WHERE apps_fts MATCH ?
-    ORDER BY rank
-    LIMIT 50
-`, ftsQuery)
+		SELECT a.id, a.slug, a.name, a.category, a.overview, a.requirements, a.image, a.created_at
+		FROM apps_fts f
+		JOIN apps a ON a.id = f.rowid
+		WHERE apps_fts MATCH ?
+		ORDER BY rank
+		LIMIT 50
+	`, ftsQuery)
 	if err != nil {
-		// fallback LIKE kalau FTS gagal
 		kw := "%" + strings.ToLower(keyword) + "%"
 		rows, err = db.Query(`
-    SELECT id, slug, name, category, overview, requirements, image, created_at
-    FROM apps
-    WHERE LOWER(name) LIKE ? OR LOWER(slug) LIKE ? OR LOWER(category) LIKE ?
-    ORDER BY name ASC
-    LIMIT 50
-`, kw, kw, kw)
+			SELECT id, slug, name, category, overview, requirements, image, created_at
+			FROM apps
+			WHERE LOWER(name) LIKE ? OR LOWER(slug) LIKE ? OR LOWER(category) LIKE ?
+			ORDER BY name ASC LIMIT 50
+		`, kw, kw, kw)
 		if err != nil {
 			return nil, err
 		}
@@ -230,12 +226,12 @@ func Search(platform, keyword string) ([]App, error) {
 	apps := make([]App, 0)
 	for rows.Next() {
 		var a App
-		if err := rows.Scan(&a.ID, &a.Slug, &a.Name, &a.Category, &a.Overview, &a.Requirements, &a.Image, &a.CreatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.Slug, &a.Name, &a.Category,
+			&a.Overview, &a.Requirements, &a.Image, &a.CreatedAt); err != nil {
 			return nil, err
 		}
 		apps = append(apps, a)
 	}
-
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -244,17 +240,16 @@ func Search(platform, keyword string) ([]App, error) {
 	for i, a := range apps {
 		ids[i] = a.ID
 	}
-	dlMap, err := batchGetDownloads(db, ids)
+	versionMap, err := batchGetVersions(db, ids)
 	if err != nil {
 		return nil, err
 	}
 	for i := range apps {
-		apps[i].Downloads = dlMap[apps[i].ID]
+		apps[i].Versions = versionMap[apps[i].ID]
 	}
 	return apps, nil
 }
 
-// SearchAll — khusus admin, tidak butuh keyword
 func SearchAll(platform string, limit, offset int) ([]App, int, error) {
 	db, err := getReadDB(platform)
 	if err != nil {
@@ -262,13 +257,13 @@ func SearchAll(platform string, limit, offset int) ([]App, int, error) {
 	}
 	var total int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM apps`).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("searchall: count: %w", err)
+		return nil, 0, err
 	}
 
 	rows, err := db.Query(`
-        SELECT id, slug, name, category, overview, requirements, image, created_at
-        FROM apps ORDER BY name ASC LIMIT ? OFFSET ?
-    `, limit, offset)
+		SELECT id, slug, name, category, overview, requirements, image, created_at
+		FROM apps ORDER BY name ASC LIMIT ? OFFSET ?
+	`, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -277,12 +272,12 @@ func SearchAll(platform string, limit, offset int) ([]App, int, error) {
 	apps := make([]App, 0)
 	for rows.Next() {
 		var a App
-		if err := rows.Scan(&a.ID, &a.Slug, &a.Name, &a.Category, &a.Overview, &a.Requirements, &a.Image, &a.CreatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.Slug, &a.Name, &a.Category,
+			&a.Overview, &a.Requirements, &a.Image, &a.CreatedAt); err != nil {
 			return nil, 0, err
 		}
 		apps = append(apps, a)
 	}
-
 	if err := rows.Err(); err != nil {
 		return nil, 0, err
 	}
@@ -291,28 +286,26 @@ func SearchAll(platform string, limit, offset int) ([]App, int, error) {
 	for i, a := range apps {
 		ids[i] = a.ID
 	}
-	dlMap, err := batchGetDownloads(db, ids)
+	versionMap, err := batchGetVersions(db, ids)
 	if err != nil {
 		return nil, 0, err
 	}
 	for i := range apps {
-		apps[i].Downloads = dlMap[apps[i].ID]
+		apps[i].Versions = versionMap[apps[i].ID]
 	}
 	return apps, total, nil
 }
 
-// SearchByCategory — browse app berdasarkan category, dengan pagination
 func SearchByCategory(platform, category string, limit, offset int) ([]App, int, error) {
 	db, err := getReadDB(platform)
 	if err != nil {
 		return nil, 0, err
 	}
-
 	cat := normalizeCategory(category)
 
 	var total int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM apps WHERE category = ?`, cat).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("searchbycategory: count: %w", err)
+		return nil, 0, err
 	}
 
 	rows, err := db.Query(`
@@ -342,28 +335,24 @@ func SearchByCategory(platform, category string, limit, offset int) ([]App, int,
 	for i, a := range apps {
 		ids[i] = a.ID
 	}
-	dlMap, err := batchGetDownloads(db, ids)
+	versionMap, err := batchGetVersions(db, ids)
 	if err != nil {
 		return nil, 0, err
 	}
 	for i := range apps {
-		apps[i].Downloads = dlMap[apps[i].ID]
+		apps[i].Versions = versionMap[apps[i].ID]
 	}
 	return apps, total, nil
 }
 
-// GetCategories — ambil semua category beserta jumlah app-nya
 func GetCategories(platform string) ([]CategoryCount, error) {
 	db, err := getReadDB(platform)
 	if err != nil {
 		return nil, err
 	}
-
 	rows, err := db.Query(`
 		SELECT category, COUNT(*) as count
-		FROM apps
-		GROUP BY category
-		ORDER BY category ASC
+		FROM apps GROUP BY category ORDER BY category ASC
 	`)
 	if err != nil {
 		return nil, err
@@ -386,18 +375,9 @@ type CategoryCount struct {
 	Count    int    `json:"count"`
 }
 
-func sanitizeFTS(q string) string {
-	replacer := strings.NewReplacer(
-		`"`, ``, `*`, ``, `(`, ``, `)`, ``,
-		`^`, ``, `{`, ``, `}`, ``, `[`, ``,
-		`]`, ``, `:`, ``, `+`, ``,
-	)
-	return strings.TrimSpace(replacer.Replace(q))
-}
-
-func batchGetDownloads(db *sql.DB, appIDs []int64) (map[int64][]Download, error) {
+func batchGetVersions(db *sql.DB, appIDs []int64) (map[int64][]AppVersion, error) {
 	if len(appIDs) == 0 {
-		return map[int64][]Download{}, nil
+		return map[int64][]AppVersion{}, nil
 	}
 	placeholders := strings.Repeat("?,", len(appIDs))
 	placeholders = placeholders[:len(placeholders)-1]
@@ -406,27 +386,33 @@ func batchGetDownloads(db *sql.DB, appIDs []int64) (map[int64][]Download, error)
 		args[i] = id
 	}
 	rows, err := db.Query(
-		`SELECT id, app_id, version, variant, raw_url FROM app_downloads
-         WHERE app_id IN (`+placeholders+`) ORDER BY app_id, version DESC, id ASC`,
+		`SELECT id, app_id, version, cdn_query, created_at FROM (
+			SELECT id, app_id, version, cdn_query, created_at,
+					ROW_NUMBER() OVER (PARTITION BY app_id ORDER BY created_at DESC) AS rn
+			FROM app_versions
+			WHERE app_id IN (`+placeholders+`)
+		) WHERE rn <= 5`,
 		args...,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	result := make(map[int64][]Download)
+
+	result := make(map[int64][]AppVersion)
 	for rows.Next() {
-		var d Download
-		if err := rows.Scan(&d.ID, &d.AppID, &d.Version, &d.Variant, &d.RawURL); err != nil {
+		var v AppVersion
+		if err := rows.Scan(&v.ID, &v.AppID, &v.Version, &v.CDNQuery, &v.CreatedAt); err != nil {
 			return nil, err
 		}
-		result[d.AppID] = append(result[d.AppID], d)
+		result[v.AppID] = append(result[v.AppID], v)
 	}
 	return result, rows.Err()
 }
 
 // ─── Write ────────────────────────────────────────────────────────────────────
 
+// UpsertEntry — input dari admin, tanpa URL
 type UpsertEntry struct {
 	Name         string
 	Category     string
@@ -434,8 +420,9 @@ type UpsertEntry struct {
 	Requirements string
 	Image        string
 	Version      string
-	Variant      string
-	RawURL       string
+	// CDNQuery opsional — override keyword pencarian CDN
+	// kosong = pakai nama app
+	CDNQuery string
 }
 
 type UpsertResult struct {
@@ -446,8 +433,6 @@ type UpsertResult struct {
 	Duplicate bool   `json:"duplicate"`
 }
 
-// Upsert menyimpan satu entry. Kalau app dengan Name yang sama sudah ada,
-// hanya tambah versi baru (skip kalau versi juga sudah ada → duplicate).
 func Upsert(platform string, e UpsertEntry) (UpsertResult, error) {
 	db, err := getWriteDB(platform)
 	if err != nil {
@@ -458,7 +443,7 @@ func Upsert(platform string, e UpsertEntry) (UpsertResult, error) {
 	if err != nil {
 		return UpsertResult{}, fmt.Errorf("upsert: begin tx: %w", err)
 	}
-	defer tx.Rollback() // no-op kalau sudah Commit
+	defer tx.Rollback()
 
 	baseSlug := toSlug(e.Name)
 	slug := baseSlug
@@ -469,7 +454,6 @@ func Upsert(platform string, e UpsertEntry) (UpsertResult, error) {
 			break
 		}
 		if i == 10 {
-			// pakai timestamp sebagai last resort, collision probability ~0
 			slug = fmt.Sprintf("%s-%d", baseSlug, time.Now().UnixMilli())
 			break
 		}
@@ -485,7 +469,7 @@ func Upsert(platform string, e UpsertEntry) (UpsertResult, error) {
 	if err == sql.ErrNoRows {
 		res, err := tx.Exec(
 			`INSERT INTO apps (slug, name, category, overview, requirements, image, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 			slug, e.Name, normalizeCategory(e.Category),
 			e.Overview, e.Requirements, e.Image, time.Now().Format(time.RFC3339),
 		)
@@ -494,7 +478,8 @@ func Upsert(platform string, e UpsertEntry) (UpsertResult, error) {
 		}
 		appID, _ = res.LastInsertId()
 		existingSlug = slug
-		if err := insertVersionTx(tx, appID, e.Version, e.Variant, e.RawURL); err != nil {
+
+		if err := insertVersionTx(tx, appID, e.Version, e.CDNQuery); err != nil {
 			return UpsertResult{}, err
 		}
 		if err := tx.Commit(); err != nil {
@@ -506,21 +491,24 @@ func Upsert(platform string, e UpsertEntry) (UpsertResult, error) {
 		return UpsertResult{}, err
 	}
 
+	// app sudah ada — cek duplikat versi
 	var versionExists int
 	tx.QueryRow(
-		`SELECT COUNT(*) FROM app_downloads WHERE app_id = ? AND LOWER(version) = LOWER(?) AND LOWER(variant) = LOWER(?)`,
-		appID, e.Version, e.Variant,
+		`SELECT COUNT(*) FROM app_versions WHERE app_id = ? AND LOWER(version) = LOWER(?)`,
+		appID, e.Version,
 	).Scan(&versionExists)
 
 	if versionExists > 0 {
-		// tidak ada write, rollback otomatis dari defer
 		return UpsertResult{Slug: existingSlug, Name: e.Name, Action: "duplicate", Version: e.Version, Duplicate: true}, nil
 	}
 
-	if _, err := tx.Exec(`UPDATE apps SET image = ? WHERE id = ?`, e.Image, appID); err != nil {
-		return UpsertResult{}, fmt.Errorf("update image: %w", err)
+	// update image kalau ada yang baru
+	if e.Image != "" {
+		if _, err := tx.Exec(`UPDATE apps SET image = ? WHERE id = ?`, e.Image, appID); err != nil {
+			return UpsertResult{}, fmt.Errorf("update image: %w", err)
+		}
 	}
-	if err := insertVersionTx(tx, appID, e.Version, e.Variant, e.RawURL); err != nil {
+	if err := insertVersionTx(tx, appID, e.Version, e.CDNQuery); err != nil {
 		return UpsertResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -558,6 +546,7 @@ func BulkUpsert(platform string, entries []UpsertEntry) ([]UpsertResult, map[int
 			}
 			slug = fmt.Sprintf("%s-%d", baseSlug, attempt)
 		}
+
 		var appID int64
 		var existingSlug string
 		qErr := tx.QueryRow(
@@ -577,7 +566,7 @@ func BulkUpsert(platform string, entries []UpsertEntry) ([]UpsertResult, map[int
 			}
 			appID, _ = res.LastInsertId()
 			existingSlug = slug
-			if vErr := insertVersionTx(tx, appID, e.Version, e.Variant, e.RawURL); vErr != nil {
+			if vErr := insertVersionTx(tx, appID, e.Version, e.CDNQuery); vErr != nil {
 				errs[i] = vErr
 				continue
 			}
@@ -591,18 +580,20 @@ func BulkUpsert(platform string, entries []UpsertEntry) ([]UpsertResult, map[int
 
 		var versionExists int
 		tx.QueryRow(
-			`SELECT COUNT(*) FROM app_downloads WHERE app_id = ? AND LOWER(version) = LOWER(?) AND LOWER(variant) = LOWER(?)`,
-			appID, e.Version, e.Variant,
+			`SELECT COUNT(*) FROM app_versions WHERE app_id = ? AND LOWER(version) = LOWER(?)`,
+			appID, e.Version,
 		).Scan(&versionExists)
 		if versionExists > 0 {
 			results = append(results, UpsertResult{Slug: existingSlug, Name: e.Name, Action: "duplicate", Version: e.Version, Duplicate: true})
 			continue
 		}
-		if _, uErr := tx.Exec(`UPDATE apps SET image = ? WHERE id = ?`, e.Image, appID); uErr != nil {
-			errs[i] = fmt.Errorf("update image: %w", uErr)
-			continue
+		if e.Image != "" {
+			if _, uErr := tx.Exec(`UPDATE apps SET image = ? WHERE id = ?`, e.Image, appID); uErr != nil {
+				errs[i] = fmt.Errorf("update image: %w", uErr)
+				continue
+			}
 		}
-		if vErr := insertVersionTx(tx, appID, e.Version, e.Variant, e.RawURL); vErr != nil {
+		if vErr := insertVersionTx(tx, appID, e.Version, e.CDNQuery); vErr != nil {
 			errs[i] = vErr
 			continue
 		}
@@ -615,15 +606,14 @@ func BulkUpsert(platform string, entries []UpsertEntry) ([]UpsertResult, map[int
 	return results, errs
 }
 
-func insertVersionTx(tx *sql.Tx, appID int64, version, variant, rawURL string) error {
+func insertVersionTx(tx *sql.Tx, appID int64, version, cdnQuery string) error {
 	_, err := tx.Exec(
-		`INSERT INTO app_downloads (app_id, version, variant, raw_url) VALUES (?, ?, ?, ?)`,
-		appID, version, variant, rawURL,
+		`INSERT INTO app_versions (app_id, version, cdn_query, created_at) VALUES (?, ?, ?, ?)`,
+		appID, version, cdnQuery, time.Now().Format(time.RFC3339),
 	)
 	return err
 }
 
-// Delete menghapus app beserta semua download-nya.
 func Delete(platform, slug string) (bool, error) {
 	db, err := getWriteDB(platform)
 	if err != nil {
@@ -642,7 +632,7 @@ func DeleteVersion(platform string, versionID int64) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	res, err := db.Exec(`DELETE FROM app_downloads WHERE id = ?`, versionID)
+	res, err := db.Exec(`DELETE FROM app_versions WHERE id = ?`, versionID)
 	if err != nil {
 		return false, err
 	}
@@ -652,19 +642,22 @@ func DeleteVersion(platform string, versionID int64) (bool, error) {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// toSlug mengubah nama app menjadi URL-friendly slug.
-// "Classical Music Radio" → "classical-music-radio"
+func sanitizeFTS(q string) string {
+	replacer := strings.NewReplacer(
+		`"`, ``, `*`, ``, `(`, ``, `)`, ``,
+		`^`, ``, `{`, ``, `}`, ``, `[`, ``,
+		`]`, ``, `:`, ``, `+`, ``,
+	)
+	return strings.TrimSpace(replacer.Replace(q))
+}
+
 func toSlug(name string) string {
-	// ambil bagian sebelum versi kalau ada pola "Name vX.Y.Z ..."
-	// contoh: "Classical Music Radio v6.2.0 GP [Pro]" → "Classical Music Radio"
 	lower := strings.ToLower(name)
 	var words []string
 	for _, w := range strings.Fields(lower) {
-		// berhenti kalau mulai dari pola versi
 		if len(w) > 1 && w[0] == 'v' && w[1] >= '0' && w[1] <= '9' {
 			break
 		}
-		// buang karakter non-alfanumerik kecuali ampersand
 		clean := strings.Map(func(r rune) rune {
 			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
 				return r
@@ -681,7 +674,6 @@ func toSlug(name string) string {
 	return strings.Join(words, "-")
 }
 
-// normalizeCategory: "music and audio" → "music-and-audio"
 func normalizeCategory(cat string) string {
 	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(cat)), " ", "-")
 }

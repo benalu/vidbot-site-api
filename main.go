@@ -38,10 +38,15 @@ func main() {
 	if err := appstore.Init(filepath.Join(dataDir, "app")); err != nil {
 		log.Printf("[appstore] init error: %v", err)
 	}
-
 	if err := stats.Init("data/stats/stats.db"); err != nil {
 		log.Printf("[stats] init error: %v", err)
 	}
+
+	// background goroutine: WAL checkpoint + stats log
+	bgCtx, bgCancel := context.WithCancel(context.Background())
+	defer bgCancel()
+	leakcheck.Default.StartBackground(bgCtx)
+
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 	router.Setup(r, cfg)
@@ -64,7 +69,11 @@ func main() {
 
 	log.Println("Shutting down server...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	bgCancel() // hentikan background goroutine
+
+	// timeout diperpanjang: reload bisa makan waktu lama
+	// kalau tidak ada reload aktif, shutdown selesai dalam detik
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
 	stream.CancelAllSessions()

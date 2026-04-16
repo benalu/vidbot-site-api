@@ -13,7 +13,7 @@ import (
 const (
 	appSlPrefix    = "app:sl:"
 	appSlIdxPrefix = "app:sl:idx:"
-	appSlTTL       = 720 * time.Hour
+	appSlTTL       = 5 * 24 * time.Hour
 )
 
 // MaskURL menyimpan raw URL ke Redis dan mengembalikan short key.

@@ -4,12 +4,20 @@ import (
 	"vidbot-api/config"
 	apphandler "vidbot-api/internal/services/app"
 	"vidbot-api/middleware"
+	"vidbot-api/pkg/cdnstore"
 
 	"github.com/gin-gonic/gin"
 )
 
 func setupApp(r *gin.Engine, cfg *config.Config) {
-	h := apphandler.NewHandler(cfg.AppURL)
+	// CDN resolver — nil kalau tidak dikonfigurasi (graceful degradation)
+	var cdnResolver *cdnstore.Resolver
+	if cfg.CDNAPIKey != "" {
+		cdnClient := cdnstore.NewClient(cfg.CDNAPIKey, cfg.CDNFolderID)
+		cdnResolver = cdnstore.NewResolver(cdnClient)
+	}
+
+	h := apphandler.NewHandler(cfg.AppURL, cdnResolver)
 
 	// ── Public search ─────────────────────────────────────────────────────────
 	appGroup := r.Group("/app",
@@ -25,7 +33,6 @@ func setupApp(r *gin.Engine, cfg *config.Config) {
 		appGroup.POST("/windows", middleware.FeatureFlagPlatform("app", "windows"), h.SearchWindows)
 		appGroup.GET("/windows/category", middleware.FeatureFlagPlatform("app", "windows"), h.CategoriesWindows)
 		appGroup.GET("/windows/category/:category", middleware.FeatureFlagPlatform("app", "windows"), h.BrowseWindows)
-
 	}
 
 	// ── Download redirect ─────────────────────────────────────────────────────
@@ -39,11 +46,11 @@ func setupApp(r *gin.Engine, cfg *config.Config) {
 		adminApp.POST("/:platform/bulk", h.AdminBulkAdd)
 		adminApp.DELETE("/:platform/app/:slug", h.AdminDelete)
 		adminApp.DELETE("/:platform/version/:id", h.AdminDeleteVersion)
+		// invalidate CDN cache — paksa refresh signed URL
+		adminApp.POST("/:platform/cdn/invalidate", h.AdminInvalidateCDNCache)
 	}
 }
 
-// validateMasterKeyMW — inline middleware cek X-Master-Key,
-// konsisten dengan cara admin/handler.go tanpa perlu duplikat struct.
 func validateMasterKeyMW(masterKey string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.GetHeader("X-Master-Key") != masterKey {
