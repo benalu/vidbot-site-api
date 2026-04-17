@@ -33,3 +33,6 @@ test.http
 prepare-commit-msg
 vidbot-api
 deploy.sh
+
+# Markdown files
+TO-DO.md

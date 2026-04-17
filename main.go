@@ -7,10 +7,12 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 	"vidbot-api/config"
 	"vidbot-api/internal/stream"
+	"vidbot-api/middleware"
 	"vidbot-api/pkg/appstore"
 	"vidbot-api/pkg/cache"
 	"vidbot-api/pkg/downloader"
@@ -52,10 +54,37 @@ func main() {
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
+	r.Use(middleware.RequestID())
 	r.Use(func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "http://localhost:5501")
-		c.Header("Access-Control-Allow-Headers", "Content-Type, X-API-Key, X-Access-Token")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		origin := c.GetHeader("Origin")
+
+		if strings.HasPrefix(c.Request.URL.Path, "/admin") {
+			// Admin: restrict origin + expose header internal
+			allowed := false
+			if cfg.AllowedOrigins == "" {
+				allowed = origin == ""
+			} else {
+				for _, o := range strings.Split(cfg.AllowedOrigins, ",") {
+					if strings.TrimSpace(o) == origin {
+						allowed = true
+						break
+					}
+				}
+			}
+			if !allowed && origin != "" {
+				c.AbortWithStatus(403)
+				return
+			}
+			c.Header("Access-Control-Allow-Origin", origin)
+			c.Header("Access-Control-Allow-Headers", "Content-Type, X-Master-Key, X-Admin-Session")
+			c.Header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		} else {
+			// Public API: allow semua origin, hanya expose header publik
+			c.Header("Access-Control-Allow-Origin", "*")
+			c.Header("Access-Control-Allow-Headers", "Content-Type, X-API-Key, X-Access-Token")
+			c.Header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		}
+
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
 			return

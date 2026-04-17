@@ -30,6 +30,7 @@ type Config struct {
 	CloudConvertAPIKey   string
 	ConvertioAPIKey      string
 	DataDir              string
+	AllowedOrigins       string
 	// CDN stor.co.id
 	CDNAPIKey   string
 	CDNFolderID string // folder ID Android/Windows
@@ -74,6 +75,7 @@ func Load() *Config {
 		DataDir:              getEnvDefault("DATA_DIR", "./data"),
 		CDNAPIKey:            os.Getenv("CDN_API_KEY"),
 		CDNFolderID:          os.Getenv("CDN_FOLDER_ID"),
+		AllowedOrigins:       os.Getenv("ALLOWED_ORIGINS"),
 	}
 }
 

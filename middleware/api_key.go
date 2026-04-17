@@ -49,9 +49,8 @@ func RequireAPIKey() gin.HandlerFunc {
 		}
 
 		quotaKey := fmt.Sprintf("apikeys:quota:%s", keyHash)
-		quotaUsed, _ := cache.Incr(ctx, quotaKey)
-		if int(quotaUsed) > data.Quota {
-			cache.Decr(ctx, quotaKey)
+		allowed, err := cache.AtomicQuotaCheck(ctx, quotaKey, data.Quota)
+		if err != nil || !allowed {
 			c.AbortWithStatusJSON(429, gin.H{
 				"success": false,
 				"code":    "QUOTA_EXCEEDED",
@@ -102,9 +101,8 @@ func RequireAPIKeyFromQuery() gin.HandlerFunc {
 		}
 
 		quotaKey := fmt.Sprintf("apikeys:quota:%s", keyHash)
-		quotaUsed, _ := cache.Incr(ctx, quotaKey)
-		if int(quotaUsed) > data.Quota {
-			cache.Decr(ctx, quotaKey)
+		allowed, err := cache.AtomicQuotaCheck(ctx, quotaKey, data.Quota)
+		if err != nil || !allowed {
 			c.AbortWithStatusJSON(429, gin.H{
 				"success": false,
 				"code":    "QUOTA_EXCEEDED",
@@ -112,7 +110,6 @@ func RequireAPIKeyFromQuery() gin.HandlerFunc {
 			})
 			return
 		}
-
 		c.Set("api_key_data", data)
 		c.Next()
 	}

@@ -49,18 +49,6 @@ func Init(path string) error {
 	return nil
 }
 
-func Track(group, platform, keyHash string) {
-	if DB == nil {
-		return
-	}
-	if _, err := DB.Exec(
-		`INSERT INTO stats (grp, platform, key_hash) VALUES (?, ?, ?)`,
-		group, platform, keyHash,
-	); err != nil {
-		log.Printf("[stats] track error: %v", err)
-	}
-}
-
 func GetGroupStats(group string) (totalRequests int, uniqueKeys int) {
 	if DB == nil {
 		return

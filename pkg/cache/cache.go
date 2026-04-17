@@ -59,6 +59,14 @@ func ExpireCache(ctx context.Context, key string, ttl time.Duration) error {
 	return c.Expire(ctx, key, ttl).Err()
 }
 
+func SAddCache(ctx context.Context, key string, members ...interface{}) error {
+	c := cacheClient
+	if c == nil {
+		c = client
+	}
+	return c.SAdd(ctx, key, members...).Err()
+}
+
 func Init(redisURL string) {
 	opt, err := redis.ParseURL(redisURL)
 	if err != nil {
@@ -115,4 +123,19 @@ func RPush(ctx context.Context, key string, values ...interface{}) error {
 }
 func Ping(ctx context.Context) error {
 	return client.Ping(ctx).Err()
+}
+
+func AtomicQuotaCheck(ctx context.Context, key string, limit int) (bool, error) {
+	script := redis.NewScript(`
+        local current = redis.call('GET', KEYS[1])
+        if current and tonumber(current) >= tonumber(ARGV[1]) then
+            return 0
+        end
+        return redis.call('INCR', KEYS[1])
+    `)
+	result, err := script.Run(ctx, client, []string{key}, limit).Int64()
+	if err != nil {
+		return false, err
+	}
+	return result > 0, nil
 }

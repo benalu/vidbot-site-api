@@ -3,13 +3,14 @@ package router
 import (
 	"vidbot-api/config"
 	"vidbot-api/internal/admin"
+	"vidbot-api/middleware"
 
 	"github.com/gin-gonic/gin"
 )
 
 func setupAdmin(r *gin.Engine, cfg *config.Config) {
 	adminHandler := admin.NewHandler(cfg.MasterKey)
-
+	r.POST("/admin/auth/login", adminHandler.Login)
 	adminGroup := r.Group("/admin")
 	{
 		// key management
@@ -31,5 +32,9 @@ func setupAdmin(r *gin.Engine, cfg *config.Config) {
 
 		// stats
 		adminGroup.GET("/stats", adminHandler.GetStats)
+
+		// auth
+		adminGroup.POST("/auth/logout", middleware.RequireAdminSession(), adminHandler.Logout)
+		adminGroup.GET("/auth/me", middleware.RequireAdminSession(), adminHandler.Me)
 	}
 }
