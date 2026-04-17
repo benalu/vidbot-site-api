@@ -1,6 +1,7 @@
 package router
 
 import (
+	"time"
 	"vidbot-api/config"
 	"vidbot-api/internal/admin"
 	"vidbot-api/middleware"
@@ -10,7 +11,11 @@ import (
 
 func setupAdmin(r *gin.Engine, cfg *config.Config) {
 	adminHandler := admin.NewHandler(cfg.MasterKey)
-	r.POST("/admin/auth/login", adminHandler.Login)
+	r.POST(
+		"/admin/auth/login",
+		middleware.AdminLoginRateLimit(5, time.Minute),
+		adminHandler.Login,
+	)
 	adminGroup := r.Group("/admin")
 	{
 		// key management

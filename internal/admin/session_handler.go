@@ -2,9 +2,11 @@ package admin
 
 import (
 	"context"
-	"crypto/rand"
+	crand "crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"math/rand"
+
 	"fmt"
 	"net/http"
 	"time"
@@ -48,7 +50,7 @@ func (h *Handler) Login(c *gin.Context) {
 	}
 
 	raw := make([]byte, 32)
-	if _, err := rand.Read(raw); err != nil {
+	if _, err := crand.Read(raw); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to generate session"})
 		return
 	}
@@ -70,7 +72,9 @@ func (h *Handler) Login(c *gin.Context) {
 		return
 	}
 	cache.SAdd(ctx, adminSessionIndex, token)
-
+	if rand.Intn(10) == 0 {
+		go CleanupExpiredSessions()
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success":       true,
 		"session_token": token,
@@ -82,7 +86,7 @@ func (h *Handler) Logout(c *gin.Context) {
 	token := c.GetHeader("X-Admin-Session")
 	ctx := context.Background()
 	cache.Del(ctx, adminSessionPrefix+token)
-	cache.Del(ctx, adminSessionIndex)
+	cache.SRem(ctx, adminSessionIndex, token)
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Logged out"})
 }
 
@@ -116,4 +120,21 @@ func ValidateAdminSession(token string) (*AdminSessionData, error) {
 	}
 
 	return &data, nil
+}
+
+func CleanupExpiredSessions() {
+	ctx := context.Background()
+
+	tokens, err := cache.SMembers(ctx, adminSessionIndex)
+	if err != nil {
+		return
+	}
+
+	for _, token := range tokens {
+		_, err := cache.Get(ctx, adminSessionPrefix+token)
+		if err != nil {
+			// session sudah expired → hapus dari index
+			cache.SRem(ctx, adminSessionIndex, token)
+		}
+	}
 }

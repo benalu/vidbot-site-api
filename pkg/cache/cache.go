@@ -114,6 +114,10 @@ func LRange(ctx context.Context, key string) ([]string, error) {
 	return client.LRange(ctx, key, 0, -1).Result()
 }
 
+func SRem(ctx context.Context, key string, members ...interface{}) error {
+	return client.SRem(ctx, key, members...).Err()
+}
+
 func Del(ctx context.Context, keys ...string) error {
 	return client.Del(ctx, keys...).Err()
 }
