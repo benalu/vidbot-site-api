@@ -23,9 +23,9 @@ func MaskURL(rawURL string) (string, error) {
 	defer cancel()
 
 	idxKey := appSlIdxPrefix + hashKey(rawURL)
-	if existing, err := cache.Get(ctx, idxKey); err == nil && existing != "" {
-		_ = cache.Expire(ctx, appSlPrefix+existing, appSlTTL)
-		_ = cache.Expire(ctx, idxKey, appSlTTL)
+	if existing, err := cache.GetCache(ctx, idxKey); err == nil && existing != "" {
+		_ = cache.ExpireCache(ctx, appSlPrefix+existing, appSlTTL)
+		_ = cache.ExpireCache(ctx, idxKey, appSlTTL)
 		return existing, nil
 	}
 
@@ -35,10 +35,10 @@ func MaskURL(rawURL string) (string, error) {
 	}
 	key := hex.EncodeToString(raw)
 
-	if err := cache.Set(ctx, appSlPrefix+key, rawURL, appSlTTL); err != nil {
+	if err := cache.SetCache(ctx, appSlPrefix+key, rawURL, appSlTTL); err != nil {
 		return "", fmt.Errorf("appstore: redis set: %w", err)
 	}
-	_ = cache.Set(ctx, idxKey, key, appSlTTL)
+	_ = cache.SetCache(ctx, idxKey, key, appSlTTL)
 
 	return key, nil
 }
@@ -47,7 +47,7 @@ func MaskURL(rawURL string) (string, error) {
 func ResolveURL(key string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	rawURL, err := cache.Get(ctx, appSlPrefix+key)
+	rawURL, err := cache.GetCache(ctx, appSlPrefix+key)
 	if err != nil {
 		return "", fmt.Errorf("appstore: link tidak ditemukan atau sudah kedaluwarsa")
 	}

@@ -66,7 +66,7 @@ func (r *Resolver) GetOrFetchFiles(ctx context.Context, platform, appSlug, appNa
 }
 
 func (r *Resolver) loadFromCache(ctx context.Context, cacheKey string) ([]CachedFile, error) {
-	raw, err := cache.Get(ctx, cacheKey)
+	raw, err := cache.GetCache(ctx, cacheKey)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +117,7 @@ func (r *Resolver) fetchAndCache(ctx context.Context, platform, appSlug, appName
 
 	// simpan ke Redis
 	data, _ := json.Marshal(result)
-	if err := cache.Set(ctx, cacheKey, string(data), signedURLTTL); err != nil {
+	if err := cache.SetCache(ctx, cacheKey, string(data), signedURLTTL); err != nil {
 		log.Printf("[cdnstore] warn: cache set failed: %v", err)
 	}
 
@@ -173,5 +173,5 @@ func extractVersion(originalName string) string {
 
 // InvalidateCache — hapus cache untuk app tertentu (misal setelah update)
 func (r *Resolver) InvalidateCache(ctx context.Context, platform, appSlug, version string) error {
-	return cache.Del(ctx, cdnCacheKey(platform, appSlug, version))
+	return cache.DelCache(ctx, cdnCacheKey(platform, appSlug, version))
 }

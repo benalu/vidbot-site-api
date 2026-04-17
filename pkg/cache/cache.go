@@ -9,6 +9,55 @@ import (
 )
 
 var client *redis.Client
+var cacheClient *redis.Client // redis response cache
+
+func InitCache(redisURL string) {
+	opt, err := redis.ParseURL(redisURL)
+	if err != nil {
+		log.Fatalf("Failed to parse Cache Redis URL: %v", err)
+	}
+	cacheClient = redis.NewClient(opt)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := cacheClient.Ping(ctx).Err(); err != nil {
+		log.Fatalf("Failed to connect to Cache Redis: %v", err)
+	}
+	log.Println("Cache Redis connected")
+}
+
+// GetCache, SetCache, DelCache — pakai cacheClient, fallback ke client kalau cacheClient nil
+func GetCache(ctx context.Context, key string) (string, error) {
+	c := cacheClient
+	if c == nil {
+		c = client
+	}
+	return c.Get(ctx, key).Result()
+}
+
+func SetCache(ctx context.Context, key string, value string, ttl time.Duration) error {
+	c := cacheClient
+	if c == nil {
+		c = client
+	}
+	return c.Set(ctx, key, value, ttl).Err()
+}
+
+func DelCache(ctx context.Context, keys ...string) error {
+	c := cacheClient
+	if c == nil {
+		c = client
+	}
+	return c.Del(ctx, keys...).Err()
+}
+
+func ExpireCache(ctx context.Context, key string, ttl time.Duration) error {
+	c := cacheClient
+	if c == nil {
+		c = client
+	}
+	return c.Expire(ctx, key, ttl).Err()
+}
 
 func Init(redisURL string) {
 	opt, err := redis.ParseURL(redisURL)

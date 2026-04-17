@@ -27,6 +27,9 @@ func main() {
 	downloader.InitKeys(cfg.PayloadEncryptKey, cfg.PayloadHMACKey)
 
 	cache.Init(cfg.RedisURL)
+	if cfg.CacheRedisURL != "" {
+		cache.InitCache(cfg.CacheRedisURL)
+	}
 
 	dataDir := cfg.DataDir
 	if dataDir == "" {

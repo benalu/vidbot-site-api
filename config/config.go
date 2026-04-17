@@ -13,6 +13,7 @@ type Config struct {
 	APIKey               string
 	MagicString          string
 	RedisURL             string
+	CacheRedisURL        string
 	WorkerURLs           []string
 	WorkerSecret         string
 	DownloadWorkerURL    string
@@ -54,6 +55,7 @@ func Load() *Config {
 		APIKey:               os.Getenv("API_KEY"),
 		MagicString:          os.Getenv("MAGIC_STRING"),
 		RedisURL:             os.Getenv("REDIS_URL"),
+		CacheRedisURL:        os.Getenv("CACHE_REDIS_URL"),
 		WorkerURLs:           workerURLs,
 		WorkerSecret:         os.Getenv("WORKER_SECRET"),
 		DownloadWorkerURL:    os.Getenv("DOWNLOAD_WORKER_URL"),

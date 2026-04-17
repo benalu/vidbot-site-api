@@ -41,9 +41,9 @@ func Create(payload downloader.Payload, cacheKey string) (string, error) {
 
 	// cek index dulu — idempoten berdasarkan cacheKey metadata
 	idxKey := indexPrefix + cacheKey
-	if existing, err := cache.Get(ctx, idxKey); err == nil && existing != "" {
-		_ = cache.Expire(ctx, keyPrefix+existing, ttl)
-		_ = cache.Expire(ctx, idxKey, ttl)
+	if existing, err := cache.GetCache(ctx, idxKey); err == nil && existing != "" {
+		_ = cache.ExpireCache(ctx, keyPrefix+existing, ttl)
+		_ = cache.ExpireCache(ctx, idxKey, ttl)
 		return existing, nil
 	}
 
@@ -58,12 +58,12 @@ func Create(payload downloader.Payload, cacheKey string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("shortlink: marshal: %w", err)
 	}
-	if err := cache.Set(ctx, keyPrefix+key, string(data), ttl); err != nil {
+	if err := cache.SetCache(ctx, keyPrefix+key, string(data), ttl); err != nil {
 		return "", fmt.Errorf("shortlink: redis set: %w", err)
 	}
 
 	// simpan index: cacheKey → short key
-	if err := cache.Set(ctx, idxKey, key, ttl); err != nil {
+	if err := cache.SetCache(ctx, idxKey, key, ttl); err != nil {
 		fmt.Printf("shortlink: warn: index set failed: %v\n", err)
 	}
 
@@ -73,7 +73,7 @@ func Create(payload downloader.Payload, cacheKey string) (string, error) {
 // Resolve mengambil payload dari Redis berdasarkan short key
 func Resolve(key string) (*downloader.Payload, error) {
 	ctx := context.Background()
-	raw, err := cache.Get(ctx, keyPrefix+key)
+	raw, err := cache.GetCache(ctx, keyPrefix+key)
 	if err != nil {
 		return nil, fmt.Errorf("shortlink: not found or expired")
 	}

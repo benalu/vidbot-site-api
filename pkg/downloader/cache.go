@@ -38,7 +38,7 @@ func CacheGet[T any](service, site, rawURL string) (*T, error) {
 	ctx := context.Background()
 	key := CacheKey(service, site, rawURL)
 
-	val, err := cache.Get(ctx, key)
+	val, err := cache.GetCache(ctx, key)
 	if err == redis.Nil {
 		return nil, nil
 	}
@@ -67,7 +67,7 @@ func CacheSet[T any](service, site, rawURL string, data *T) error {
 	if err != nil {
 		return err
 	}
-	return cache.Set(ctx, key, string(bytes), ttl)
+	return cache.SetCache(ctx, key, string(bytes), ttl)
 }
 
 func hashURL(rawURL string) [32]byte {
