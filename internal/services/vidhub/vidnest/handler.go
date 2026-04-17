@@ -1,7 +1,7 @@
 package vidnest
 
 import (
-	"log"
+	"log/slog"
 	"vidbot-api/pkg/downloader"
 	"vidbot-api/pkg/httputil"
 	"vidbot-api/pkg/mediaresponse"
@@ -68,7 +68,7 @@ func (h *Handler) Extract(c *gin.Context) {
 
 	result, err := h.service.Extract(req.URL)
 	if err != nil {
-		log.Printf("[vidnest] extract error: %v", err)
+		slog.Error("extract failed", "group", "vidhub", "platform", "vidnest", "error", err)
 		response.ErrorWithCode(c, 500, "EXTRACTION_FAILED", "Unable to process the requested URL. The content may be unavailable or the link has expired.")
 		return
 	}

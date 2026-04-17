@@ -3,7 +3,7 @@ package appstore
 import (
 	"database/sql"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -103,11 +103,11 @@ func Init(dir string) error {
 			defer ticker.Stop()
 			for range ticker.C {
 				if _, err := wDB.Exec(`PRAGMA wal_checkpoint(PASSIVE)`); err != nil {
-					log.Printf("[appstore] wal_checkpoint %s: %v", pName, err)
+					slog.Warn("wal checkpoint failed", "platform", pName, "error", err)
 				}
 			}
 		}()
-		log.Printf("[appstore] %s.db ready — %d apps", platform, appCount)
+		slog.Info("appstore db ready", "platform", platform, "apps", appCount)
 	}
 	return nil
 }

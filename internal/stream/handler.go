@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"math/rand"
 	"net/http"
 	"net/url"
@@ -101,7 +101,7 @@ func getOrCreateSession(cacheKey, m3u8URL, toolsDir string) *hlsSession {
 		err := runDirectHLS(ctx, m3u8URL, toolsDir, sess)
 		if err != nil && ctx.Err() == nil {
 			// fallback ke yt-dlp kalau direct gagal
-			log.Printf("[progressive] direct HLS failed (%v), falling back to yt-dlp", err)
+			slog.Warn("direct hls failed, falling back to yt-dlp", "error", err)
 			sess.mu.Lock()
 			sess.chunks = nil // reset chunks
 			sess.done = false
@@ -111,7 +111,7 @@ func getOrCreateSession(cacheKey, m3u8URL, toolsDir string) *hlsSession {
 		}
 
 		if err != nil && ctx.Err() == nil {
-			log.Printf("[progressive] all methods failed: %v", err)
+			slog.Error("all download methods failed", "error", err)
 			sess.mu.Lock()
 			sess.err = err
 			sess.done = true
@@ -124,7 +124,7 @@ func getOrCreateSession(cacheKey, m3u8URL, toolsDir string) *hlsSession {
 			delete(hlsSessions, cacheKey)
 			hlsSessionsMu.Unlock()
 			sess.freeChunks() // ← tambah ini
-			log.Printf("[progressive] session expired: %s", cacheKey)
+			slog.Info("hls session expired", "cache_key", cacheKey)
 		})
 	}()
 
@@ -460,7 +460,7 @@ func runDirectHLS(ctx context.Context, m3u8URL, toolsDir string, sess *hlsSessio
 				strings.Contains(lower, "fatal") ||
 				strings.Contains(lower, "invalid") ||
 				strings.Contains(lower, "failed") {
-				log.Printf("[ffmpeg] %s", line)
+				slog.Debug("ffmpeg stderr", "line", line)
 			}
 		}
 	}()
@@ -489,7 +489,7 @@ func runDirectHLS(ctx context.Context, m3u8URL, toolsDir string, sess *hlsSessio
 				if segErr == nil {
 					break
 				}
-				log.Printf("[direct_hls] segment %d attempt %d failed: %v", i, attempt+1, segErr)
+				slog.Warn("segment download failed", "segment", i, "attempt", attempt+1, "error", segErr)
 				// jeda sebentar sebelum retry — lebih natural
 				select {
 				case <-ctx.Done():
@@ -654,7 +654,7 @@ func runYTDLP(ctx context.Context, m3u8URL, toolsDir string, sess *hlsSession) e
 				strings.Contains(lower, "fatal") ||
 				strings.Contains(lower, "invalid") ||
 				strings.Contains(lower, "failed") {
-				log.Printf("[yt-dlp] %s", line)
+				slog.Debug("yt-dlp stderr", "line", line)
 			}
 		}
 	}()
@@ -878,7 +878,7 @@ func (h *Handler) streamProgressive(c *gin.Context, payload *downloader.Payload,
 				// grace period — biarkan hidup kalau session masih muda
 				return
 			}
-			log.Printf("[progressive] all readers gone after %v, cancelling: %s", age, cacheKey)
+			slog.Warn("all readers gone, cancelling session", "age", age, "cache_key", cacheKey)
 			if sess.cancel != nil {
 				sess.cancel()
 			}
@@ -917,7 +917,7 @@ func (h *Handler) streamProgressive(c *gin.Context, payload *downloader.Payload,
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("[progressive] client disconnected at chunk %d", idx)
+			slog.Info("client disconnected", "chunk", idx)
 			return
 		default:
 		}
@@ -931,7 +931,7 @@ func (h *Handler) streamProgressive(c *gin.Context, payload *downloader.Payload,
 		if idx < available {
 			chunk := sess.chunks[idx]
 			if _, writeErr := c.Writer.Write(chunk.data); writeErr != nil {
-				log.Printf("[progressive] write error at chunk %d: %v", idx, writeErr)
+				slog.Warn("chunk write error", "chunk", idx, "error", writeErr)
 				return
 			}
 			c.Writer.Flush()
@@ -941,7 +941,7 @@ func (h *Handler) streamProgressive(c *gin.Context, payload *downloader.Payload,
 
 		if done || sessErr != nil {
 			if sessErr != nil {
-				log.Printf("[progressive] stream ended with error: %v", sessErr)
+				slog.Error("stream ended with error", "error", sessErr)
 			} else {
 
 			}
@@ -949,7 +949,7 @@ func (h *Handler) streamProgressive(c *gin.Context, payload *downloader.Payload,
 		}
 
 		if !sess.waitForChunk(idx, ctx) {
-			log.Printf("[progressive] wait timeout or client gone at chunk %d", idx)
+			slog.Warn("wait timeout or client disconnected", "chunk", idx)
 			return
 		}
 	}

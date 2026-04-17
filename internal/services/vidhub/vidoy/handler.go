@@ -1,7 +1,7 @@
 package vidoy
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 	"vidbot-api/pkg/downloader"
 	"vidbot-api/pkg/mediaresponse"
@@ -64,7 +64,7 @@ func (h *Handler) Extract(c *gin.Context) {
 
 	result, err := h.service.Extract(req.URL)
 	if err != nil {
-		log.Printf("[vidoy] extract error: %v", err)
+		slog.Error("extract failed", "group", "vidhub", "platform", "vidoy", "error", err)
 		response.ErrorWithCode(c, 500, "EXTRACTION_FAILED", "Unable to process the requested URL. The content may be unavailable or the link has expired.")
 		return
 	}

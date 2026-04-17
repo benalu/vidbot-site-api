@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"time"
@@ -98,7 +98,7 @@ func (r *Resolver) fetchAndCache(ctx context.Context, platform, appSlug, appName
 	for _, f := range relevant {
 		dlResp, err := r.client.GetDownloadURL(ctx, f.ID, expiresInHours)
 		if err != nil {
-			log.Printf("[cdnstore] skip file %s (%s): %v", f.ID, f.OriginalName, err)
+			slog.Warn("cdnstore skip file", "file_id", f.ID, "name", f.OriginalName, "error", err)
 			continue
 		}
 		result = append(result, CachedFile{
@@ -118,7 +118,7 @@ func (r *Resolver) fetchAndCache(ctx context.Context, platform, appSlug, appName
 	// simpan ke Redis
 	data, _ := json.Marshal(result)
 	if err := cache.SetCache(ctx, cacheKey, string(data), signedURLTTL); err != nil {
-		log.Printf("[cdnstore] warn: cache set failed: %v", err)
+		slog.Warn("cdnstore cache set failed", "error", err)
 	}
 
 	return result, nil

@@ -2,7 +2,7 @@ package instagram
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"vidbot-api/internal/services/content/provider"
 	"vidbot-api/pkg/downloader"
 	"vidbot-api/pkg/httputil"
@@ -84,7 +84,7 @@ func (h *Handler) Extract(c *gin.Context) {
 
 	result, err := h.service.Extract(req.URL)
 	if err != nil {
-		log.Printf("[instagram] extract error: %v", err)
+		slog.Error("extract failed", "group", "content", "platform", "instagram", "error", err)
 		response.ErrorWithCode(c, 500, "EXTRACTION_FAILED", "Unable to process the requested URL. The content may be private, deleted, or temporarily unavailable.")
 		return
 	}

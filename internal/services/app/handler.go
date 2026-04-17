@@ -3,7 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -261,7 +261,7 @@ func (h *Handler) buildDownloadItems(ctx context.Context, a appstore.App, platfo
 	// fetch semua file sekaligus, tanpa filter versi (version = "")
 	files, err := h.cdnResolver.GetOrFetchFiles(ctx, platform, a.Slug, cdnKeyword, "")
 	if err != nil {
-		log.Printf("[app] cdn fetch failed for %s: %v", a.Name, err)
+		slog.Error("cdn fetch failed", "group", "app", "name", a.Name, "error", err)
 		return []downloadItem{}
 	}
 
@@ -271,7 +271,7 @@ func (h *Handler) buildDownloadItems(ctx context.Context, a appstore.App, platfo
 	for _, f := range files {
 		masked, err := appstore.MaskURL(f.SignedURL)
 		if err != nil {
-			log.Printf("[app] mask url failed for %s: %v", f.FileID, err)
+			slog.Error("mask url failed", "group", "app", "file_id", f.FileID, "error", err)
 			continue
 		}
 

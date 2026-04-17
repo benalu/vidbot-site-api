@@ -2,7 +2,7 @@ package cache
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -45,7 +45,7 @@ func (pc *ProviderCache) load(keys []string) {
 	pc.data = newData
 	pc.mu.Unlock()
 
-	log.Printf("[provider_cache] loaded %d keys", len(newData))
+	slog.Debug("provider cache loaded", "keys", len(newData))
 }
 
 func (pc *ProviderCache) startRefresh(keys []string) {

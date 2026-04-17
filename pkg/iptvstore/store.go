@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -148,19 +148,18 @@ func (s *Store) Init() error {
 		return fmt.Errorf("load streams: %w", err)
 	}
 	if err := s.loadLogos(); err != nil {
-		log.Printf("[iptv] load logos error: %v", err)
+		slog.Warn("iptv load logos failed", "error", err)
 	}
 	if err := s.loadCountries(); err != nil {
-		log.Printf("[iptv] load countries error: %v", err)
+		slog.Warn("iptv load countries failed", "error", err)
 	}
 	if err := s.loadCategories(); err != nil {
-		log.Printf("[iptv] load categories error: %v", err)
+		slog.Warn("iptv load categories failed", "error", err)
 	}
 	s.buildIndexes()
 	go s.startRefresh()
 
-	log.Printf("[iptv] loaded %d channels, %d streams, %d logos, %d countries, %d categories",
-		len(s.channels), len(s.streams), len(s.logos), len(s.countries), len(s.categories))
+	slog.Info("iptv store initialized", "channels", len(s.channels), "streams", len(s.streams), "logos", len(s.logos), "countries", len(s.countries), "categories", len(s.categories))
 	return nil
 }
 
@@ -192,28 +191,28 @@ func (s *Store) startRefresh() {
 	for {
 		select {
 		case <-staticTicker.C:
-			log.Println("[iptv] refreshing static data...")
+			slog.Info("iptv refreshing static data")
 			if err := s.loadChannels(); err != nil {
-				log.Printf("[iptv] refresh channels error: %v", err)
+				slog.Warn("iptv refresh channels failed", "error", err)
 			}
 			if err := s.loadLogos(); err != nil {
-				log.Printf("[iptv] refresh logos error: %v", err)
+				slog.Warn("iptv refresh logos failed", "error", err)
 			}
 			if err := s.loadCountries(); err != nil {
-				log.Printf("[iptv] refresh countries error: %v", err)
+				slog.Warn("iptv refresh countries failed", "error", err)
 			}
 			if err := s.loadCategories(); err != nil {
-				log.Printf("[iptv] refresh categories error: %v", err)
+				slog.Warn("iptv refresh categories failed", "error", err)
 			}
 			s.buildIndexes()
-			log.Println("[iptv] static data refreshed")
+			slog.Info("iptv static data refreshed")
 		case <-streamTicker.C:
-			log.Println("[iptv] refreshing streams...")
+			slog.Info("iptv refreshing streams")
 			if err := s.loadStreams(); err != nil {
-				log.Printf("[iptv] refresh streams error: %v", err)
+				slog.Warn("iptv refresh streams failed", "error", err)
 			} else {
 				s.buildIndexes()
-				log.Println("[iptv] streams refreshed")
+				slog.Info("iptv streams refreshed")
 			}
 		}
 	}

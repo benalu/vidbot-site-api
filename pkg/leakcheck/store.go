@@ -5,7 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -77,7 +77,7 @@ func (s *Store) Init(dir string) error {
 	}
 
 	if count > 0 {
-		log.Printf("[leakcheck] database already has %d entries (%s), skip reload", count, dbPath)
+		slog.Info("leakcheck db already populated, skip reload", "count", count, "path", dbPath)
 		return nil
 	}
 
@@ -103,7 +103,7 @@ func (s *Store) StartBackground(ctx context.Context) {
 				s.mu.RUnlock()
 				if db != nil {
 					if _, err := db.Exec(`PRAGMA wal_checkpoint(PASSIVE)`); err != nil {
-						log.Printf("[leakcheck] wal_checkpoint error: %v", err)
+						slog.Warn("leakcheck wal checkpoint failed", "error", err)
 					}
 				}
 			case <-ctx.Done():
@@ -119,7 +119,7 @@ func (s *Store) StartBackground(ctx context.Context) {
 		for {
 			select {
 			case <-ticker.C:
-				log.Printf("[leakcheck] entries: %d", s.Count())
+				slog.Info("leakcheck entry count", "count", s.Count())
 			case <-ctx.Done():
 				return
 			}
@@ -157,7 +157,7 @@ func (s *Store) AddDir(newDir string) (int, error) {
 		return 0, err
 	}
 
-	log.Printf("[leakcheck] AddDir: added %d new entries from %s", inserted, newDir)
+	slog.Info("leakcheck dir added", "inserted", inserted, "dir", newDir)
 	return inserted, nil
 }
 
@@ -213,7 +213,7 @@ func (s *Store) searchEmail(db *sql.DB, q string) []Entry {
 		LIMIT 500
 	`, ftsQuery)
 	if err != nil {
-		log.Printf("[leakcheck] fts email search failed, fallback: %v", err)
+		slog.Warn("leakcheck fts search failed, using fallback", "error", err)
 		return s.searchFallback(q)
 	}
 	defer rows.Close()
@@ -264,7 +264,7 @@ func (s *Store) searchUsername(db *sql.DB, q string) []Entry {
 		LIMIT 500
 	`, ftsQuery)
 	if err != nil {
-		log.Printf("[leakcheck] fts username search failed, fallback: %v", err)
+		slog.Warn("leakcheck fts search failed, using fallback", "error", err)
 		return s.searchFallback(q)
 	}
 	defer rows.Close()
@@ -339,7 +339,7 @@ func (s *Store) Reload(dir string) (int, error) {
 		os.Remove(f)
 	}
 
-	log.Printf("[leakcheck] reload: building new database at %s", tmpPath)
+	slog.Info("leakcheck reload started", "tmp_path", tmpPath)
 	reloadStart := time.Now()
 	newDB, err := buildDatabase(tmpPath, dir)
 	if err != nil {
@@ -358,7 +358,7 @@ func (s *Store) Reload(dir string) (int, error) {
 		}
 		return 0, fmt.Errorf("reload: new database is empty, aborting swap")
 	}
-	log.Printf("[leakcheck] reload: new database ready with %d entries, swapping", count)
+	slog.Info("leakcheck new db ready, swapping", "count", count)
 
 	// swap pointer — search tetap jalan selama swap
 	s.mu.Lock()
@@ -381,7 +381,7 @@ func (s *Store) Reload(dir string) (int, error) {
 		os.Remove(f)
 	}
 	if err := os.Rename(tmpPath, dbPath); err != nil {
-		log.Printf("[leakcheck] reload: rename failed (non-fatal): %v", err)
+		slog.Warn("leakcheck rename failed (non-fatal)", "error", err)
 	}
 
 	// Buka ulang koneksi dari path canonical supaya konsisten setelah restart
@@ -405,7 +405,7 @@ func (s *Store) Reload(dir string) (int, error) {
 	s.mu.RLock()
 	s.readDB.QueryRow(`SELECT COUNT(1) FROM leakcheck`).Scan(&count)
 	s.mu.RUnlock()
-	log.Printf("[leakcheck] reload: done in %s, total entries: %d", time.Since(reloadStart).Round(time.Millisecond), count)
+	slog.Info("leakcheck reload done", "elapsed", time.Since(reloadStart).Round(time.Millisecond), "count", count)
 	return count, nil
 }
 
@@ -558,11 +558,11 @@ func buildDatabase(dbPath, dir string) (*sql.DB, error) {
 		CREATE INDEX IF NOT EXISTS idx_leakcheck_login ON leakcheck(lower(login));
 		CREATE INDEX IF NOT EXISTS idx_leakcheck_host  ON leakcheck(lower(host));
 	`); err != nil {
-		log.Printf("[leakcheck] index creation warning: %v", err)
+		slog.Warn("leakcheck index creation warning", "error", err)
 	}
 
 	if _, err := db.Exec(`INSERT INTO leakcheck_fts(leakcheck_fts) VALUES('rebuild')`); err != nil {
-		log.Printf("[leakcheck] fts rebuild warning: %v", err)
+		slog.Warn("leakcheck fts rebuild warning", "error", err)
 	}
 
 	if _, err := db.Exec(`
@@ -592,10 +592,10 @@ func buildDatabase(dbPath, dir string) (*sql.DB, error) {
 		PRAGMA cache_size=-128000;
 		PRAGMA mmap_size=268435456;
 	`); err != nil {
-		log.Printf("[leakcheck] pragma restore warning: %v", err)
+		slog.Warn("leakcheck pragmas warning", "error", err)
 	}
 
-	log.Printf("[leakcheck] buildDatabase: inserted %d entries", inserted)
+	slog.Info("leakcheck build done", "inserted", inserted)
 	return db, nil
 }
 
@@ -617,12 +617,12 @@ func (s *Store) loadFromDirLocked(dir string) error {
 	}
 
 	if _, err := s.db.Exec(`INSERT INTO leakcheck_fts(leakcheck_fts) VALUES('rebuild')`); err != nil {
-		log.Printf("[leakcheck] fts rebuild warning: %v", err)
+		slog.Warn("leakcheck fts rebuild warning", "error", err)
 	} else {
-		log.Printf("[leakcheck] fts index rebuilt")
+		slog.Info("leakcheck FTS rebuild done")
 	}
 
-	log.Printf("[leakcheck] loaded %d entries from %s", inserted, dir)
+	slog.Info("leakcheck loaded", "inserted", inserted, "dir", dir)
 	return nil
 }
 
@@ -681,7 +681,7 @@ func insertEntriesFromDirDedup(dir string, db *sql.DB) (int, error) {
 		fileCount++
 		entries, err := parseFile(path)
 		if err != nil {
-			log.Printf("[leakcheck] error parsing %s: %v", filepath.Base(path), err)
+			slog.Error("leakcheck parse file failed", "file", filepath.Base(path), "error", err)
 			errorCount++
 			return nil
 		}
@@ -725,8 +725,7 @@ func insertEntriesFromDirDedup(dir string, db *sql.DB) (int, error) {
 		return inserted, err
 	}
 
-	log.Printf("[leakcheck] scanned %d files, skipped %d empty, %d errors, inserted %d entries (dedup)",
-		fileCount, skippedCount, errorCount, inserted)
+	slog.Info("leakcheck scan done", "files", fileCount, "skipped", skippedCount, "errors", errorCount, "inserted", inserted)
 	return inserted, nil
 }
 
@@ -785,7 +784,7 @@ func insertEntriesFromDirIncremental(dir string, db *sql.DB) (int, error) {
 		fileCount++
 		entries, err := parseFile(path)
 		if err != nil {
-			log.Printf("[leakcheck] error parsing %s: %v", filepath.Base(path), err)
+			slog.Error("leakcheck parse file failed", "file", filepath.Base(path), "error", err)
 			errorCount++
 			return nil
 		}
@@ -823,8 +822,7 @@ func insertEntriesFromDirIncremental(dir string, db *sql.DB) (int, error) {
 		return inserted, err
 	}
 
-	log.Printf("[leakcheck] incremental: scanned %d files, skipped %d empty, %d errors, inserted %d new entries",
-		fileCount, skippedCount, errorCount, inserted)
+	slog.Info("leakcheck scan done", "files", fileCount, "skipped", skippedCount, "errors", errorCount, "inserted", inserted)
 	return inserted, nil
 }
 
