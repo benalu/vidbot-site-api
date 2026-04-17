@@ -116,6 +116,92 @@ func GetTodayStats(group string) (totalRequests int) {
 	return
 }
 
+// GetDailyStats — trend N hari terakhir per group
+func GetDailyStats(group string, days int) []map[string]interface{} {
+	if DB == nil {
+		return nil
+	}
+	rows, err := DB.Query(`
+        SELECT DATE(created_at) as date, COUNT(*) as count
+        FROM stats
+        WHERE grp = ?
+          AND created_at >= datetime('now', ?)
+        GROUP BY DATE(created_at)
+        ORDER BY date ASC
+    `, group, fmt.Sprintf("-%d days", days))
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	result := []map[string]interface{}{}
+	for rows.Next() {
+		var date string
+		var count int
+		rows.Scan(&date, &count)
+		result = append(result, map[string]interface{}{"date": date, "count": count})
+	}
+	return result
+}
+
+// GetHourlyStats — breakdown per jam hari ini per group
+func GetHourlyStats(group string) []map[string]interface{} {
+	if DB == nil {
+		return nil
+	}
+	rows, err := DB.Query(`
+        SELECT strftime('%H', created_at) as hour, COUNT(*) as count
+        FROM stats
+        WHERE grp = ?
+          AND DATE(created_at) = DATE('now')
+        GROUP BY hour
+        ORDER BY hour ASC
+    `, group)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	result := []map[string]interface{}{}
+	for rows.Next() {
+		var hour string
+		var count int
+		rows.Scan(&hour, &count)
+		result = append(result, map[string]interface{}{"hour": hour, "count": count})
+	}
+	return result
+}
+
+// GetTopKeys — top N API key by total usage
+func GetTopKeys(limit int) []map[string]interface{} {
+	if DB == nil {
+		return nil
+	}
+	rows, err := DB.Query(`
+        SELECT key_hash, COUNT(*) as count
+        FROM stats
+        GROUP BY key_hash
+        ORDER BY count DESC
+        LIMIT ?
+    `, limit)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	result := []map[string]interface{}{}
+	for rows.Next() {
+		var keyHash string
+		var count int
+		rows.Scan(&keyHash, &count)
+		result = append(result, map[string]interface{}{
+			"key_hash": keyHash,
+			"count":    count,
+		})
+	}
+	return result
+}
+
 // Cleanup — hapus data lebih dari N hari untuk jaga ukuran database
 func Cleanup(days int) {
 	if DB == nil {

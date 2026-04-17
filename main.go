@@ -51,8 +51,8 @@ func main() {
 	r := gin.Default()
 	r.Use(func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "http://localhost:5501")
-		c.Header("Access-Control-Allow-Headers", "Content-Type, X-Master-Key, X-API-Key, X-Access-Token")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Content-Type, X-API-Key, X-Access-Token")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
 			return

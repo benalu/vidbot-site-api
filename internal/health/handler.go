@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"sync"
 	"time"
+	"vidbot-api/pkg/appstore"
 	"vidbot-api/pkg/cache"
 	"vidbot-api/pkg/iptvstore"
 	"vidbot-api/pkg/leakcheck"
@@ -55,6 +56,7 @@ func (h *Handler) Check(c *gin.Context) {
 		convertio    string
 		workers      gin.H
 		leakcheck    gin.H
+		appstore     gin.H
 	}
 
 	var (
@@ -103,6 +105,12 @@ func (h *Handler) Check(c *gin.Context) {
 			res.leakcheck = v
 			mu.Unlock()
 		}},
+		{"appstore", func() {
+			v := checkAppStore()
+			mu.Lock()
+			res.appstore = v
+			mu.Unlock()
+		}},
 		{"workers", func() {
 			v := checkWorkers(h.workerURLs, h.workerSecret)
 			mu.Lock()
@@ -144,7 +152,8 @@ func (h *Handler) Check(c *gin.Context) {
 		},
 		"leakcheck": res.leakcheck,
 		"iptv":      res.iptv,
-		"providers": gin.H{
+		"appstore":  res.appstore,
+		"comvert": gin.H{
 			"cloudconvert": res.cloudconvert,
 			"convertio":    res.convertio,
 		},
@@ -183,6 +192,19 @@ func checkLeakcheck() gin.H {
 		"status":  "ok",
 		"entries": leakcheck.Default.Count(),
 	}
+}
+func checkAppStore() gin.H {
+	result := gin.H{}
+	for _, platform := range []string{"android", "windows"} {
+		_, total, err := appstore.SearchAll(platform, 1, 0)
+		status := "ok"
+		if err != nil {
+			status = "down"
+			total = 0
+		}
+		result[platform] = gin.H{"status": status, "total": total}
+	}
+	return result
 }
 
 func checkStats() string {

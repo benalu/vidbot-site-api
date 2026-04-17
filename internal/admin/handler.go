@@ -182,6 +182,7 @@ func (h *Handler) ListKeys(c *gin.Context) {
 	}
 
 	activeFilter := c.Query("active")
+	emailFilter := c.Query("email")
 
 	ctx := context.Background()
 	keyHashes, err := cache.SMembers(ctx, "apikeys:index")
@@ -209,6 +210,9 @@ func (h *Handler) ListKeys(c *gin.Context) {
 			continue
 		}
 		if activeFilter == "false" && data.Active {
+			continue
+		}
+		if emailFilter != "" && data.Email != emailFilter {
 			continue
 		}
 
@@ -547,7 +551,6 @@ func (h *Handler) GetStats(c *gin.Context) {
 		}
 	}
 
-	// hitung grand total dari semua group
 	grandTotalReq := 0
 	grandUniqueKeys := 0
 	grandTodayReq := 0
@@ -569,21 +572,82 @@ func (h *Handler) GetStats(c *gin.Context) {
 			}
 			usageData[group] = gin.H{"platforms": platformData}
 		} else {
-			// group tanpa platform — tampilkan total request langsung
 			usageData[group] = totalReq
 		}
 	}
 
+	// query params opsional
+	days := 7
+	if d := c.Query("days"); d != "" {
+		fmt.Sscanf(d, "%d", &days)
+		if days < 1 || days > 90 {
+			days = 7
+		}
+	}
+
+	topLimit := 5
+	if t := c.Query("top"); t != "" {
+		fmt.Sscanf(t, "%d", &topLimit)
+		if topLimit < 1 || topLimit > 20 {
+			topLimit = 5
+		}
+	}
+
+	// daily trend per group
+	dailyTrend := gin.H{}
+	for group := range validGroups {
+		dailyTrend[group] = stats.GetDailyStats(group, days)
+	}
+
+	// hourly breakdown hari ini — semua group digabung atau per group
+	hourlyBreakdown := gin.H{}
+	if c.Query("hourly") == "1" {
+		for group := range validGroups {
+			hourlyBreakdown[group] = stats.GetHourlyStats(group)
+		}
+	}
+
+	// top keys — enrich dengan nama kalau bisa
+	topKeysRaw := stats.GetTopKeys(topLimit)
+	topKeys := make([]gin.H, 0, len(topKeysRaw))
+	for _, k := range topKeysRaw {
+		keyHash, _ := k["key_hash"].(string)
+		entry := gin.H{
+			"key_hash": keyHash,
+			"count":    k["count"],
+		}
+		if raw, err := cache.Get(ctx, fmt.Sprintf("apikeys:%s", keyHash)); err == nil {
+			var data apikey.Data
+			if json.Unmarshal([]byte(raw), &data) == nil {
+				entry["name"] = data.Name
+				entry["email"] = data.Email
+				entry["active"] = data.Active
+			}
+		}
+		topKeys = append(topKeys, entry)
+	}
+
+	resp := gin.H{
+		"total_keys":     totalKeys,
+		"active_keys":    activeKeys,
+		"total_requests": grandTotalReq,
+		"today_requests": grandTodayReq,
+		"unique_keys":    grandUniqueKeys,
+		"usage":          usageData,
+		"trend": gin.H{
+			"days":  days,
+			"daily": dailyTrend,
+		},
+		"top_keys": topKeys,
+	}
+
+	if c.Query("hourly") == "1" {
+		resp["hourly"] = hourlyBreakdown
+	}
+
 	c.JSON(http.StatusOK, adminResponse{
 		Success: true,
-		Data: gin.H{
-			"total_keys":     totalKeys,
-			"active_keys":    activeKeys,
-			"total_requests": grandTotalReq,
-			"today_requests": grandTodayReq,
-			"unique_keys":    grandUniqueKeys,
-			"usage":          usageData,
-		},
+		Data:    resp,
 	})
 }
 
