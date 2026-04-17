@@ -38,6 +38,9 @@ func setupAdmin(r *gin.Engine, cfg *config.Config) {
 		// stats
 		adminGroup.GET("/stats", adminHandler.GetStats)
 
+		// redis / upstash monitoring
+		adminGroup.GET("/redis/stats", adminHandler.GetRedisStats)
+
 		// auth
 		adminGroup.POST("/auth/logout", middleware.RequireAdminSession(), adminHandler.Logout)
 		adminGroup.GET("/auth/me", middleware.RequireAdminSession(), adminHandler.Me)

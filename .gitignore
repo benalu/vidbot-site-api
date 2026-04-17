@@ -23,9 +23,7 @@ tmp/
 vendor/
 
 # leakcheck
-internal/services/leakcheck/
-pkg/leakcheck/
-router/leakcheck.go
+
 
 generate_masterkey.py
 ecnrypt_worker.py
