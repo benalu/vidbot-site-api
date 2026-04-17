@@ -90,12 +90,13 @@ func (h *Handler) CreateKey(c *gin.Context) {
 		return
 	}
 	plainKey := hex.EncodeToString(raw)
-
+	keyPrefix := plainKey[:8]
 	hash := sha256.Sum256([]byte(plainKey))
 	keyHash := hex.EncodeToString(hash[:])
 
 	data := apikey.Data{
 		KeyHash:   keyHash,
+		KeyPrefix: keyPrefix,
 		Name:      req.Name,
 		Email:     req.Email,
 		Active:    true,
@@ -195,8 +196,14 @@ func (h *Handler) ListKeys(c *gin.Context) {
 		if err != nil {
 			continue
 		}
+
 		var data apikey.Data
 		json.Unmarshal([]byte(raw), &data)
+
+		prefix := data.KeyPrefix
+		if prefix == "" {
+			prefix = data.KeyHash[:8]
+		}
 
 		if activeFilter == "true" && !data.Active {
 			continue
@@ -205,13 +212,20 @@ func (h *Handler) ListKeys(c *gin.Context) {
 			continue
 		}
 
+		quotaUsedStr, _ := cache.Get(ctx, fmt.Sprintf("apikeys:quota:%s", keyHash))
+		used := 0
+		fmt.Sscanf(quotaUsedStr, "%d", &used)
+
 		result = append(result, gin.H{
-			"key_hash":   data.KeyHash[:8] + "...",
-			"name":       data.Name,
-			"email":      data.Email,
-			"active":     data.Active,
-			"quota":      data.Quota,
-			"created_at": data.CreatedAt,
+			"key_hash":        data.KeyHash,
+			"key_prefix":      prefix,
+			"name":            data.Name,
+			"email":           data.Email,
+			"active":          data.Active,
+			"quota":           data.Quota,
+			"quota_used":      used,
+			"quota_remaining": data.Quota - used,
+			"created_at":      data.CreatedAt,
 		})
 	}
 
@@ -219,6 +233,68 @@ func (h *Handler) ListKeys(c *gin.Context) {
 		"success": true,
 		"total":   len(result),
 		"data":    result,
+	})
+}
+
+func (h *Handler) LookupKey(c *gin.Context) {
+	if !h.validateMasterKey(c) {
+		return
+	}
+
+	var req struct {
+		APIKey string `json:"api_key"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil || req.APIKey == "" {
+		c.JSON(http.StatusBadRequest, adminErrorResponse{
+			Success: false,
+			Code:    "BAD_REQUEST",
+			Message: "api_key is required",
+		})
+		return
+	}
+
+	// hash dari API key
+	hash := sha256.Sum256([]byte(req.APIKey))
+	keyHash := hex.EncodeToString(hash[:])
+
+	ctx := context.Background()
+
+	// ambil data key
+	raw, err := cache.Get(ctx, fmt.Sprintf("apikeys:%s", keyHash))
+	if err != nil {
+		c.JSON(http.StatusNotFound, adminErrorResponse{
+			Success: false,
+			Code:    "NOT_FOUND",
+			Message: "API key not found",
+		})
+		return
+	}
+
+	var data apikey.Data
+	json.Unmarshal([]byte(raw), &data)
+
+	// ambil usage
+	quotaUsedStr, _ := cache.Get(ctx, fmt.Sprintf("apikeys:quota:%s", keyHash))
+	used := 0
+	fmt.Sscanf(quotaUsedStr, "%d", &used)
+
+	usagePerGroup := stats.GetKeyUsageByGroup(keyHash)
+
+	c.JSON(http.StatusOK, adminResponse{
+		Success: true,
+		Data: gin.H{
+			"key_hash":        keyHash,
+			"key_prefix":      data.KeyPrefix,
+			"name":            data.Name,
+			"email":           data.Email,
+			"active":          data.Active,
+			"quota":           data.Quota,
+			"quota_used":      used,
+			"quota_remaining": data.Quota - used,
+			"created_at":      data.CreatedAt,
+			"usage_per_group": usagePerGroup,
+		},
 	})
 }
 
@@ -516,9 +592,7 @@ func (h *Handler) GetKeyUsage(c *gin.Context) {
 		return
 	}
 
-	plainKey := c.Param("key")
-	hash := sha256.Sum256([]byte(plainKey))
-	keyHash := hex.EncodeToString(hash[:])
+	keyHash := c.Param("key")
 
 	ctx := context.Background()
 	raw, err := cache.Get(ctx, fmt.Sprintf("apikeys:%s", keyHash))
@@ -538,7 +612,6 @@ func (h *Handler) GetKeyUsage(c *gin.Context) {
 	used := 0
 	fmt.Sscanf(quotaUsedStr, "%d", &used)
 
-	// ambil usage per group dari SQLite
 	usagePerGroup := stats.GetKeyUsageByGroup(keyHash)
 
 	c.JSON(http.StatusOK, adminResponse{

@@ -18,6 +18,7 @@ func setupAdmin(r *gin.Engine, cfg *config.Config) {
 		adminGroup.GET("/keys", adminHandler.ListKeys)
 		adminGroup.POST("/keys/:key/topup", adminHandler.TopUpQuota)
 		adminGroup.GET("/keys/:key/usage", adminHandler.GetKeyUsage)
+		adminGroup.POST("/keys/lookup", adminHandler.LookupKey)
 
 		// feature flags — group level
 		adminGroup.GET("/features", adminHandler.GetFeatures)
