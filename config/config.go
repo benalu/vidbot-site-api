@@ -31,6 +31,8 @@ type Config struct {
 	ConvertioAPIKey      string
 	DataDir              string
 	AllowedOrigins       string
+	StatsDSN             string
+	LeakcheckDSN         string
 	// CDN stor.co.id
 	CDNAPIKey   string
 	CDNFolderID string // folder ID Android/Windows
@@ -76,6 +78,8 @@ func Load() *Config {
 		CDNAPIKey:            os.Getenv("CDN_API_KEY"),
 		CDNFolderID:          os.Getenv("CDN_FOLDER_ID"),
 		AllowedOrigins:       os.Getenv("ALLOWED_ORIGINS"),
+		StatsDSN:             os.Getenv("STATS_DB_DSN"),
+		LeakcheckDSN:         os.Getenv("LEAKCHECK_DB_DSN"),
 	}
 }
 

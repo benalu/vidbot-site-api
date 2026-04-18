@@ -211,7 +211,9 @@ func checkStats() string {
 	if stats.DB == nil {
 		return "down"
 	}
-	if err := stats.DB.Ping(); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := stats.DB.PingContext(ctx); err != nil {
 		return "down"
 	}
 	return "ok"

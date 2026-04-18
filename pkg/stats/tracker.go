@@ -1,6 +1,7 @@
 package stats
 
 import (
+	"log/slog"
 	"time"
 	"vidbot-api/pkg/apikey"
 
@@ -17,6 +18,7 @@ var trackCh = make(chan trackEvent, 2000)
 
 func init() {
 	go batchWorker()
+	go cleanupScheduler()
 }
 
 func batchWorker() {
@@ -48,12 +50,15 @@ func flushBatch(events []trackEvent) {
 
 	tx, err := DB.Begin()
 	if err != nil {
+		slog.Warn("stats flush begin failed", "error", err)
 		return
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(`INSERT INTO stats (grp, platform, key_hash) VALUES (?, ?, ?)`)
+	// PostgreSQL pakai $1, $2, $3 bukan ?, ?, ?
+	stmt, err := tx.Prepare(`INSERT INTO stats (grp, platform, key_hash) VALUES ($1, $2, $3)`)
 	if err != nil {
+		slog.Warn("stats flush prepare failed", "error", err)
 		return
 	}
 	defer stmt.Close()
@@ -63,6 +68,16 @@ func flushBatch(events []trackEvent) {
 	}
 
 	tx.Commit()
+}
+
+// cleanupScheduler — auto cleanup data > 90 hari, jalan setiap hari jam 02:00
+func cleanupScheduler() {
+	for {
+		now := time.Now()
+		next := time.Date(now.Year(), now.Month(), now.Day()+1, 2, 0, 0, 0, now.Location())
+		time.Sleep(time.Until(next))
+		Cleanup(90)
+	}
 }
 
 func Platform(c *gin.Context, group, platform string) {

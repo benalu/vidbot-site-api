@@ -53,13 +53,14 @@ func main() {
 		dataDir = "data"
 	}
 
+	os.Setenv("LEAKCHECK_DB_DSN", cfg.LeakcheckDSN)
 	if err := leakcheck.Default.Init(filepath.Join(dataDir, "leakcheck")); err != nil {
 		slog.Warn("leakcheck init failed", "error", err)
 	}
 	if err := appstore.Init(filepath.Join(dataDir, "app")); err != nil {
 		slog.Warn("appstore init failed", "error", err)
 	}
-	if err := stats.Init("data/stats/stats.db"); err != nil {
+	if err := stats.Init(cfg.StatsDSN); err != nil {
 		slog.Warn("stats db init failed", "error", err)
 	}
 

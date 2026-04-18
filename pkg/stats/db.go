@@ -3,50 +3,62 @@ package stats
 import (
 	"database/sql"
 	"fmt"
-	"log"
+	"log/slog"
+	"os"
+	"time"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 var DB *sql.DB
 
-func Init(path string) error {
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		return err
+func Init(dsn string) error {
+	if dsn == "" {
+		dsn = os.Getenv("STATS_DB_DSN")
+	}
+	if dsn == "" {
+		dsn = "host=localhost port=5432 user=postgres password=postgres dbname=vidbot_stats sslmode=disable"
 	}
 
-	db.SetMaxOpenConns(1)
-	_, err = db.Exec(`
-		PRAGMA journal_mode=WAL;
-		PRAGMA synchronous=NORMAL;
-		PRAGMA cache_size=-32000;
-		PRAGMA temp_store=MEMORY;
-	`)
+	db, err := sql.Open("pgx", dsn)
 	if err != nil {
-		return err
+		return fmt.Errorf("stats: open db: %w", err)
 	}
 
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS stats (
-			id        INTEGER PRIMARY KEY AUTOINCREMENT,
-			grp       TEXT NOT NULL,
-			platform  TEXT,
-			key_hash  TEXT NOT NULL,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-		);
-		CREATE INDEX IF NOT EXISTS idx_stats_grp ON stats(grp);
-		CREATE INDEX IF NOT EXISTS idx_stats_platform ON stats(grp, platform);
-		CREATE INDEX IF NOT EXISTS idx_stats_key ON stats(key_hash);
-		CREATE INDEX IF NOT EXISTS idx_stats_time ON stats(created_at);
-	`)
-	if err != nil {
-		return err
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(30 * time.Minute)
+	db.SetConnMaxIdleTime(5 * time.Minute)
+
+	if err := db.Ping(); err != nil {
+		return fmt.Errorf("stats: ping failed: %w", err)
+	}
+
+	if err := migrate(db); err != nil {
+		return fmt.Errorf("stats: migrate: %w", err)
 	}
 
 	DB = db
-	log.Println("[statsdb] SQLite connected:", path)
+	slog.Info("stats db connected (postgres)", "dsn_hint", maskDSN(dsn))
 	return nil
+}
+
+func migrate(db *sql.DB) error {
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS stats (
+			id         BIGSERIAL PRIMARY KEY,
+			grp        TEXT        NOT NULL,
+			platform   TEXT,
+			key_hash   TEXT        NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_stats_grp      ON stats(grp);
+		CREATE INDEX IF NOT EXISTS idx_stats_platform ON stats(grp, platform);
+		CREATE INDEX IF NOT EXISTS idx_stats_key      ON stats(key_hash);
+		CREATE INDEX IF NOT EXISTS idx_stats_time     ON stats(created_at);
+	`)
+	return err
 }
 
 func GetGroupStats(group string) (totalRequests int, uniqueKeys int) {
@@ -54,7 +66,7 @@ func GetGroupStats(group string) (totalRequests int, uniqueKeys int) {
 		return
 	}
 	DB.QueryRow(
-		`SELECT COUNT(*), COUNT(DISTINCT key_hash) FROM stats WHERE grp = ?`, group,
+		`SELECT COUNT(*), COUNT(DISTINCT key_hash) FROM stats WHERE grp = $1`, group,
 	).Scan(&totalRequests, &uniqueKeys)
 	return
 }
@@ -64,7 +76,7 @@ func GetPlatformStats(group, platform string) (totalRequests int, uniqueKeys int
 		return
 	}
 	DB.QueryRow(
-		`SELECT COUNT(*), COUNT(DISTINCT key_hash) FROM stats WHERE grp = ? AND platform = ?`,
+		`SELECT COUNT(*), COUNT(DISTINCT key_hash) FROM stats WHERE grp = $1 AND platform = $2`,
 		group, platform,
 	).Scan(&totalRequests, &uniqueKeys)
 	return
@@ -75,7 +87,7 @@ func GetKeyUsageByGroup(keyHash string) map[string]int {
 		return map[string]int{}
 	}
 	rows, err := DB.Query(
-		`SELECT grp, COUNT(*) FROM stats WHERE key_hash = ? GROUP BY grp`, keyHash,
+		`SELECT grp, COUNT(*) FROM stats WHERE key_hash = $1 GROUP BY grp`, keyHash,
 	)
 	if err != nil {
 		return map[string]int{}
@@ -92,31 +104,29 @@ func GetKeyUsageByGroup(keyHash string) map[string]int {
 	return result
 }
 
-// GetTodayStats — stats hari ini saja
 func GetTodayStats(group string) (totalRequests int) {
 	if DB == nil {
 		return
 	}
 	DB.QueryRow(
-		`SELECT COUNT(*) FROM stats WHERE grp = ? AND DATE(created_at) = DATE('now')`,
+		`SELECT COUNT(*) FROM stats WHERE grp = $1 AND created_at >= CURRENT_DATE`,
 		group,
 	).Scan(&totalRequests)
 	return
 }
 
-// GetDailyStats — trend N hari terakhir per group
 func GetDailyStats(group string, days int) []map[string]interface{} {
 	if DB == nil {
 		return nil
 	}
 	rows, err := DB.Query(`
-        SELECT DATE(created_at) as date, COUNT(*) as count
-        FROM stats
-        WHERE grp = ?
-          AND created_at >= datetime('now', ?)
-        GROUP BY DATE(created_at)
-        ORDER BY date ASC
-    `, group, fmt.Sprintf("-%d days", days))
+		SELECT DATE(created_at) as date, COUNT(*) as count
+		FROM stats
+		WHERE grp = $1
+		  AND created_at >= NOW() - ($2 || ' days')::INTERVAL
+		GROUP BY DATE(created_at)
+		ORDER BY date ASC
+	`, group, days)
 	if err != nil {
 		return nil
 	}
@@ -132,19 +142,18 @@ func GetDailyStats(group string, days int) []map[string]interface{} {
 	return result
 }
 
-// GetHourlyStats — breakdown per jam hari ini per group
 func GetHourlyStats(group string) []map[string]interface{} {
 	if DB == nil {
 		return nil
 	}
 	rows, err := DB.Query(`
-        SELECT strftime('%H', created_at) as hour, COUNT(*) as count
-        FROM stats
-        WHERE grp = ?
-          AND DATE(created_at) = DATE('now')
-        GROUP BY hour
-        ORDER BY hour ASC
-    `, group)
+		SELECT TO_CHAR(created_at, 'HH24') as hour, COUNT(*) as count
+		FROM stats
+		WHERE grp = $1
+		  AND created_at >= CURRENT_DATE
+		GROUP BY hour
+		ORDER BY hour ASC
+	`, group)
 	if err != nil {
 		return nil
 	}
@@ -160,18 +169,17 @@ func GetHourlyStats(group string) []map[string]interface{} {
 	return result
 }
 
-// GetTopKeys — top N API key by total usage
 func GetTopKeys(limit int) []map[string]interface{} {
 	if DB == nil {
 		return nil
 	}
 	rows, err := DB.Query(`
-        SELECT key_hash, COUNT(*) as count
-        FROM stats
-        GROUP BY key_hash
-        ORDER BY count DESC
-        LIMIT ?
-    `, limit)
+		SELECT key_hash, COUNT(*) as count
+		FROM stats
+		GROUP BY key_hash
+		ORDER BY count DESC
+		LIMIT $1
+	`, limit)
 	if err != nil {
 		return nil
 	}
@@ -190,13 +198,25 @@ func GetTopKeys(limit int) []map[string]interface{} {
 	return result
 }
 
-// Cleanup — hapus data lebih dari N hari untuk jaga ukuran database
 func Cleanup(days int) {
 	if DB == nil {
 		return
 	}
-	DB.Exec(
-		`DELETE FROM stats WHERE created_at < datetime('now', ?)`,
-		fmt.Sprintf("-%d days", days),
+	res, err := DB.Exec(
+		`DELETE FROM stats WHERE created_at < NOW() - ($1 || ' days')::INTERVAL`,
+		days,
 	)
+	if err != nil {
+		slog.Warn("stats cleanup failed", "error", err)
+		return
+	}
+	n, _ := res.RowsAffected()
+	slog.Info("stats cleanup done", "deleted", n, "older_than_days", days)
+}
+
+func maskDSN(dsn string) string {
+	if len(dsn) > 30 {
+		return dsn[:20] + "..."
+	}
+	return dsn
 }
