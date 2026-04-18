@@ -4,45 +4,50 @@ import (
 	"time"
 	"vidbot-api/config"
 	"vidbot-api/internal/admin"
+	"vidbot-api/internal/health"
 	"vidbot-api/middleware"
 
 	"github.com/gin-gonic/gin"
 )
 
-func setupAdmin(r *gin.Engine, cfg *config.Config) {
-	adminHandler := admin.NewHandler(cfg.MasterKey)
-	r.POST(
-		"/admin/auth/login",
+func setupAdmin(r *gin.Engine, cfg *config.Config, healthHandler *health.Handler) {
+	adminHandler := admin.NewHandler(cfg.MasterKey, healthHandler)
+
+	// auth — tidak butuh middleware
+	r.POST("/admin/auth/login",
 		middleware.AdminLoginRateLimit(5, time.Minute),
 		adminHandler.Login,
 	)
-	adminGroup := r.Group("/admin")
+
+	adminGroup := r.Group("/admin", middleware.RequireAdminAuth(cfg.MasterKey))
 	{
-		// key management
+		// auth
+		adminGroup.POST("/auth/logout", adminHandler.Logout)
+		adminGroup.GET("/auth/me", adminHandler.Me)
+
+		// keys
 		adminGroup.POST("/keys", adminHandler.CreateKey)
-		adminGroup.DELETE("/keys/:key", adminHandler.RevokeKey)
 		adminGroup.GET("/keys", adminHandler.ListKeys)
-		adminGroup.POST("/keys/:key/topup", adminHandler.TopUpQuota)
-		adminGroup.GET("/keys/:key/usage", adminHandler.GetKeyUsage)
 		adminGroup.POST("/keys/lookup", adminHandler.LookupKey)
+		adminGroup.DELETE("/keys/:keyHash", adminHandler.RevokeKey)
+		adminGroup.POST("/keys/:keyHash/topup", adminHandler.TopUpQuota)
+		adminGroup.GET("/keys/:keyHash/usage", adminHandler.GetKeyUsage)
 
-		// feature flags — group level
+		// feature flags
 		adminGroup.GET("/features", adminHandler.GetFeatures)
-		adminGroup.GET("/features/:group/enable", adminHandler.EnableFeature)
-		adminGroup.GET("/features/:group/disable", adminHandler.DisableFeature)
-
-		// feature flags — platform level
-		adminGroup.GET("/features/:group/:platform/enable", adminHandler.EnablePlatform)
-		adminGroup.GET("/features/:group/:platform/disable", adminHandler.DisablePlatform)
+		adminGroup.PUT("/features/:group", adminHandler.ToggleFeature)
+		adminGroup.PUT("/features/:group/:platform", adminHandler.ToggleFeaturePlatform)
 
 		// stats
 		adminGroup.GET("/stats", adminHandler.GetStats)
+		adminGroup.GET("/stats/realtime", adminHandler.GetRealtimeStats)
+		adminGroup.GET("/stats/errors", adminHandler.GetErrorStats)
 
-		// redis / upstash monitoring
-		adminGroup.GET("/redis/stats", adminHandler.GetRedisStats)
-
-		// auth
-		adminGroup.POST("/auth/logout", middleware.RequireAdminSession(), adminHandler.Logout)
-		adminGroup.GET("/auth/me", middleware.RequireAdminSession(), adminHandler.Me)
+		// system
+		adminGroup.GET("/system/health", adminHandler.GetHealth)
+		adminGroup.GET("/system/redis", adminHandler.GetRedisStats)
+		adminGroup.GET("/system/queue", adminHandler.GetSystemQueue)
+		adminGroup.GET("/system/sessions", adminHandler.GetActiveSessions)
+		adminGroup.DELETE("/system/sessions/:sessionId", adminHandler.RevokeSession)
 	}
 }

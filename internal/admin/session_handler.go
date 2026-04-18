@@ -31,17 +31,15 @@ type AdminSessionData struct {
 
 func (h *Handler) Login(c *gin.Context) {
 	var req struct {
-		MasterKey string `json:"master_key"`
+		Key string `json:"key"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false, "code": "BAD_REQUEST", "message": "master_key is required",
+			"success": false, "code": "BAD_REQUEST", "message": "key is required",
 		})
 		return
 	}
-
-	// Constant-time compare + delay untuk anti-brute-force
-	if req.MasterKey != h.masterKey {
+	if req.Key != h.masterKey {
 		time.Sleep(500 * time.Millisecond)
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"success": false, "code": "UNAUTHORIZED", "message": "Invalid credentials",
@@ -84,6 +82,11 @@ func (h *Handler) Login(c *gin.Context) {
 
 func (h *Handler) Logout(c *gin.Context) {
 	token := c.GetHeader("X-Admin-Session")
+	if token == "" {
+		// akses via X-Master-Key tidak punya session, tidak ada yang perlu di-logout
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "No session to logout"})
+		return
+	}
 	ctx := context.Background()
 	cache.Del(ctx, adminSessionPrefix+token)
 	cache.SRem(ctx, adminSessionIndex, token)
@@ -92,6 +95,17 @@ func (h *Handler) Logout(c *gin.Context) {
 
 func (h *Handler) Me(c *gin.Context) {
 	token := c.GetHeader("X-Admin-Session")
+	if token == "" {
+		// akses via X-Master-Key — tidak ada session data, kembalikan info minimal
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data": gin.H{
+				"auth_method": "master_key",
+				"session_id":  nil,
+			},
+		})
+		return
+	}
 	ctx := context.Background()
 	raw, err := cache.Get(ctx, adminSessionPrefix+token)
 	if err != nil {

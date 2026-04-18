@@ -39,28 +39,13 @@ func setupApp(r *gin.Engine, cfg *config.Config) {
 	r.GET("/app/dl", h.Download)
 
 	// ── Admin CRUD ────────────────────────────────────────────────────────────
-	adminApp := r.Group("/admin/app", validateMasterKeyMW(cfg.MasterKey))
+	adminApp := r.Group("/admin/apps", middleware.RequireAdminAuth(cfg.MasterKey))
 	{
-		adminApp.GET("/:platform/list", h.AdminList)
-		adminApp.POST("/:platform/add", h.AdminAdd)
+		adminApp.GET("/:platform", h.AdminList)
+		adminApp.POST("/:platform", h.AdminAdd)
 		adminApp.POST("/:platform/bulk", h.AdminBulkAdd)
-		adminApp.DELETE("/:platform/app/:slug", h.AdminDelete)
-		adminApp.DELETE("/:platform/version/:id", h.AdminDeleteVersion)
-		// invalidate CDN cache — paksa refresh signed URL
+		adminApp.DELETE("/:platform/:slug", h.AdminDelete)
+		adminApp.DELETE("/:platform/versions/:id", h.AdminDeleteVersion)
 		adminApp.POST("/:platform/cdn/invalidate", h.AdminInvalidateCDNCache)
-	}
-}
-
-func validateMasterKeyMW(masterKey string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if c.GetHeader("X-Master-Key") != masterKey {
-			c.AbortWithStatusJSON(401, gin.H{
-				"success": false,
-				"code":    "UNAUTHORIZED",
-				"message": "Invalid master key.",
-			})
-			return
-		}
-		c.Next()
 	}
 }

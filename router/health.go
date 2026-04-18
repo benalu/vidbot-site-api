@@ -7,7 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func setupHealth(r *gin.Engine, cfg *config.Config) {
+func setupHealth(r *gin.Engine, cfg *config.Config) *health.Handler {
 	healthHandler := health.NewHandler(
 		cfg.MasterKey,
 		cfg.CloudConvertAPIKey,
@@ -16,4 +16,5 @@ func setupHealth(r *gin.Engine, cfg *config.Config) {
 		cfg.WorkerSecret,
 	)
 	r.GET("/health", healthHandler.Check)
+	return healthHandler
 }

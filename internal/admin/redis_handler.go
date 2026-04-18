@@ -41,9 +41,6 @@ type UpstashLimits struct {
 }
 
 func (h *Handler) GetRedisStats(c *gin.Context) {
-	if !h.validateMasterKey(c) {
-		return
-	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

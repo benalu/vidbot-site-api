@@ -127,6 +127,8 @@ func (s *Store) Init(dir string) error {
 	}
 	wg.Wait()
 	slog.Info("leakcheck connection pool warmed")
+	db.QueryRow(`SELECT COUNT(1) FROM leakcheck WHERE LOWER(login) = 'warmup_dummy_xyz'`).Scan(new(int))
+	slog.Info("leakcheck query planner warmed")
 
 	var count int
 	db.QueryRow(`SELECT COUNT(1) FROM leakcheck`).Scan(&count)

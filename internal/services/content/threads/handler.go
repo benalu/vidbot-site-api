@@ -75,6 +75,7 @@ func (h *Handler) Extract(c *gin.Context) {
 	result, err := h.service.Extract(req.URL)
 	if err != nil {
 		slog.Error("extract failed", "group", "content", "platform", "threads", "error", err)
+		stats.TrackError(c, "content", "threads", "EXTRACTION_FAILED")
 		response.ErrorWithCode(c, 500, "EXTRACTION_FAILED", "Unable to process the requested URL. The content may be private, deleted, or temporarily unavailable.")
 		return
 	}

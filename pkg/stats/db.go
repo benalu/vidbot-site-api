@@ -37,6 +37,7 @@ func Init(dsn string) error {
 	if err := migrate(db); err != nil {
 		return fmt.Errorf("stats: migrate: %w", err)
 	}
+	ensurePartitionExists(db)
 
 	DB = db
 	slog.Info("stats db connected (postgres)", "dsn_hint", maskDSN(dsn))
@@ -44,21 +45,64 @@ func Init(dsn string) error {
 }
 
 func migrate(db *sql.DB) error {
-	_, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS stats (
-			id         BIGSERIAL PRIMARY KEY,
-			grp        TEXT        NOT NULL,
-			platform   TEXT,
-			key_hash   TEXT        NOT NULL,
-			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-		);
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS stats (
+            id         BIGSERIAL,
+            grp        TEXT        NOT NULL,
+            platform   TEXT,
+            key_hash   TEXT        NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        ) PARTITION BY RANGE (created_at)`,
 
-		CREATE INDEX IF NOT EXISTS idx_stats_grp      ON stats(grp);
-		CREATE INDEX IF NOT EXISTS idx_stats_platform ON stats(grp, platform);
-		CREATE INDEX IF NOT EXISTS idx_stats_key      ON stats(key_hash);
-		CREATE INDEX IF NOT EXISTS idx_stats_time     ON stats(created_at);
-	`)
-	return err
+		`CREATE TABLE IF NOT EXISTS stats_2026_04
+            PARTITION OF stats
+            FOR VALUES FROM ('2026-04-01') TO ('2026-05-01')`,
+
+		`CREATE TABLE IF NOT EXISTS stats_2026_05
+            PARTITION OF stats
+            FOR VALUES FROM ('2026-05-01') TO ('2026-06-01')`,
+
+		`CREATE INDEX IF NOT EXISTS idx_stats_grp      ON stats(grp)`,
+		`CREATE INDEX IF NOT EXISTS idx_stats_platform ON stats(grp, platform)`,
+		`CREATE INDEX IF NOT EXISTS idx_stats_key      ON stats(key_hash)`,
+		`CREATE INDEX IF NOT EXISTS idx_stats_time     ON stats(created_at)`,
+
+		// errors — letakkan di sini, setelah semua stats
+		`CREATE TABLE IF NOT EXISTS errors (
+            id         BIGSERIAL PRIMARY KEY,
+            grp        TEXT        NOT NULL,
+            platform   TEXT,
+            code       TEXT        NOT NULL,
+            key_hash   TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+
+		`CREATE INDEX IF NOT EXISTS idx_errors_grp      ON errors(grp)`,
+		`CREATE INDEX IF NOT EXISTS idx_errors_platform ON errors(grp, platform)`,
+		`CREATE INDEX IF NOT EXISTS idx_errors_code     ON errors(code)`,
+		`CREATE INDEX IF NOT EXISTS idx_errors_time     ON errors(created_at)`,
+	}
+
+	for _, s := range stmts {
+		if _, err := db.Exec(s); err != nil {
+			return fmt.Errorf("migrate: %w (stmt: %.60s...)", err, s)
+		}
+	}
+	return nil
+}
+
+func ensurePartitionExists(db *sql.DB) {
+	// buat partisi untuk bulan depan kalau belum ada
+	next := time.Now().AddDate(0, 1, 0)
+	tableName := fmt.Sprintf("stats_%s", next.Format("2006_01"))
+	start := fmt.Sprintf("%s-01", next.Format("2006-01"))
+	end := fmt.Sprintf("%s-01", next.AddDate(0, 1, 0).Format("2006-01"))
+
+	db.Exec(fmt.Sprintf(`
+        CREATE TABLE IF NOT EXISTS %s 
+        PARTITION OF stats 
+        FOR VALUES FROM ('%s') TO ('%s')
+    `, tableName, start, end))
 }
 
 func GetGroupStats(group string) (totalRequests int, uniqueKeys int) {

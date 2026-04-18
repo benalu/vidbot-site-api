@@ -9,19 +9,29 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+	"vidbot-api/internal/health"
 	"vidbot-api/pkg/apikey"
 	"vidbot-api/pkg/cache"
+	"vidbot-api/pkg/limiter"
 	"vidbot-api/pkg/stats"
 
 	"github.com/gin-gonic/gin"
 )
 
 type Handler struct {
-	masterKey string
+	masterKey     string
+	healthHandler *health.Handler
 }
 
-func NewHandler(masterKey string) *Handler {
-	return &Handler{masterKey: masterKey}
+func NewHandler(masterKey string, healthHandler *health.Handler) *Handler {
+	return &Handler{
+		masterKey:     masterKey,
+		healthHandler: healthHandler,
+	}
+}
+
+func (h *Handler) GetHealth(c *gin.Context) {
+	h.healthHandler.Check(c)
 }
 
 type CreateKeyRequest struct {
@@ -46,22 +56,7 @@ type adminErrorResponse struct {
 	Message string `json:"message"`
 }
 
-func (h *Handler) validateMasterKey(c *gin.Context) bool {
-	if c.GetHeader("X-Master-Key") != h.masterKey {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"success": false,
-			"code":    "UNAUTHORIZED",
-			"message": "Invalid master key.",
-		})
-		return false
-	}
-	return true
-}
-
 func (h *Handler) CreateKey(c *gin.Context) {
-	if !h.validateMasterKey(c) {
-		return
-	}
 
 	var req CreateKeyRequest
 	decoder := json.NewDecoder(c.Request.Body)
@@ -129,9 +124,6 @@ func (h *Handler) CreateKey(c *gin.Context) {
 }
 
 func (h *Handler) RevokeKey(c *gin.Context) {
-	if !h.validateMasterKey(c) {
-		return
-	}
 
 	if c.Request.ContentLength > 0 {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -177,9 +169,6 @@ func (h *Handler) RevokeKey(c *gin.Context) {
 }
 
 func (h *Handler) ListKeys(c *gin.Context) {
-	if !h.validateMasterKey(c) {
-		return
-	}
 
 	activeFilter := c.Query("active")
 	emailFilter := c.Query("email")
@@ -241,9 +230,6 @@ func (h *Handler) ListKeys(c *gin.Context) {
 }
 
 func (h *Handler) LookupKey(c *gin.Context) {
-	if !h.validateMasterKey(c) {
-		return
-	}
 
 	var req struct {
 		APIKey string `json:"api_key"`
@@ -303,9 +289,6 @@ func (h *Handler) LookupKey(c *gin.Context) {
 }
 
 func (h *Handler) TopUpQuota(c *gin.Context) {
-	if !h.validateMasterKey(c) {
-		return
-	}
 
 	apiKey := c.Param("key")
 	var req struct {
@@ -379,10 +362,6 @@ func isValidPlatform(group, platform string) bool {
 }
 
 func (h *Handler) GetFeatures(c *gin.Context) {
-	if !h.validateMasterKey(c) {
-		return
-	}
-
 	ctx := context.Background()
 	result := gin.H{}
 
@@ -428,59 +407,39 @@ func (h *Handler) GetFeatures(c *gin.Context) {
 	})
 }
 
-func (h *Handler) EnableFeature(c *gin.Context) {
-	if !h.validateMasterKey(c) {
-		return
-	}
-
+func (h *Handler) ToggleFeature(c *gin.Context) {
 	group := c.Param("group")
 	if !validGroups[group] {
 		c.JSON(http.StatusBadRequest, adminErrorResponse{
 			Success: false,
 			Code:    "INVALID_GROUP",
-			Message: fmt.Sprintf("Group '%s' is not recognized. Valid groups: content, convert, iptv, vidhub.", group),
+			Message: fmt.Sprintf("Group '%s' is not recognized.", group),
 		})
 		return
 	}
 
-	ctx := context.Background()
-	cache.Set(ctx, fmt.Sprintf("feature:%s", group), "on", 0)
-
-	c.JSON(http.StatusOK, adminMessageResponse{
-		Success: true,
-		Message: fmt.Sprintf("Feature '%s' is now enabled.", group),
-	})
-}
-
-func (h *Handler) DisableFeature(c *gin.Context) {
-	if !h.validateMasterKey(c) {
-		return
+	var req struct {
+		Status string `json:"status"`
 	}
-
-	group := c.Param("group")
-	if !validGroups[group] {
+	if err := c.ShouldBindJSON(&req); err != nil || (req.Status != "on" && req.Status != "off") {
 		c.JSON(http.StatusBadRequest, adminErrorResponse{
 			Success: false,
-			Code:    "INVALID_GROUP",
-			Message: fmt.Sprintf("Group '%s' is not recognized. Valid groups: content, convert, iptv, vidhub.", group),
+			Code:    "BAD_REQUEST",
+			Message: "status must be 'on' or 'off'",
 		})
 		return
 	}
 
 	ctx := context.Background()
-	cache.Set(ctx, fmt.Sprintf("feature:%s", group), "off", 0)
+	cache.Set(ctx, fmt.Sprintf("feature:%s", group), req.Status, 0)
 
 	c.JSON(http.StatusOK, adminMessageResponse{
 		Success: true,
-		Message: fmt.Sprintf("Feature '%s' is now disabled.", group),
+		Message: fmt.Sprintf("Feature '%s' is now %s.", group, req.Status),
 	})
 }
 
-func (h *Handler) EnablePlatform(c *gin.Context) {
-	if !h.validateMasterKey(c) {
-		return
-	}
-
+func (h *Handler) ToggleFeaturePlatform(c *gin.Context) {
 	group := c.Param("group")
 	platform := c.Param("platform")
 
@@ -488,51 +447,33 @@ func (h *Handler) EnablePlatform(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, adminErrorResponse{
 			Success: false,
 			Code:    "INVALID_PLATFORM",
-			Message: fmt.Sprintf("Platform '%s' is not valid for group '%s'. Check /admin/features for available platforms.", platform, group),
+			Message: fmt.Sprintf("Platform '%s' is not valid for group '%s'.", platform, group),
 		})
 		return
 	}
 
-	ctx := context.Background()
-	cache.Set(ctx, fmt.Sprintf("feature:%s:%s", group, platform), "on", 0)
-
-	c.JSON(http.StatusOK, adminMessageResponse{
-		Success: true,
-		Message: fmt.Sprintf("Platform '%s/%s' is now enabled.", group, platform),
-	})
-}
-
-func (h *Handler) DisablePlatform(c *gin.Context) {
-	if !h.validateMasterKey(c) {
-		return
+	var req struct {
+		Status string `json:"status"`
 	}
-
-	group := c.Param("group")
-	platform := c.Param("platform")
-
-	if !isValidPlatform(group, platform) {
+	if err := c.ShouldBindJSON(&req); err != nil || (req.Status != "on" && req.Status != "off") {
 		c.JSON(http.StatusBadRequest, adminErrorResponse{
 			Success: false,
-			Code:    "INVALID_PLATFORM",
-			Message: fmt.Sprintf("Platform '%s' is not valid for group '%s'. Check /admin/features for available platforms.", platform, group),
+			Code:    "BAD_REQUEST",
+			Message: "status must be 'on' or 'off'",
 		})
 		return
 	}
 
 	ctx := context.Background()
-	cache.Set(ctx, fmt.Sprintf("feature:%s:%s", group, platform), "off", 0)
+	cache.Set(ctx, fmt.Sprintf("feature:%s:%s", group, platform), req.Status, 0)
 
 	c.JSON(http.StatusOK, adminMessageResponse{
 		Success: true,
-		Message: fmt.Sprintf("Platform '%s/%s' is now disabled.", group, platform),
+		Message: fmt.Sprintf("Platform '%s/%s' is now %s.", group, platform, req.Status),
 	})
 }
 
 func (h *Handler) GetStats(c *gin.Context) {
-	if !h.validateMasterKey(c) {
-		return
-	}
-
 	ctx := context.Background()
 
 	// total keys
@@ -652,10 +593,6 @@ func (h *Handler) GetStats(c *gin.Context) {
 }
 
 func (h *Handler) GetKeyUsage(c *gin.Context) {
-	if !h.validateMasterKey(c) {
-		return
-	}
-
 	keyHash := c.Param("key")
 
 	ctx := context.Background()
@@ -689,6 +626,119 @@ func (h *Handler) GetKeyUsage(c *gin.Context) {
 			"quota_remaining": data.Quota - used,
 			"created_at":      data.CreatedAt,
 			"usage_per_group": usagePerGroup,
+		},
+	})
+}
+
+func (h *Handler) GetRealtimeStats(c *gin.Context) {
+	minutes := 30
+	if m := c.Query("minutes"); m != "" {
+		fmt.Sscanf(m, "%d", &minutes)
+		if minutes < 1 || minutes > 1440 {
+			minutes = 30
+		}
+	}
+
+	c.JSON(http.StatusOK, adminResponse{
+		Success: true,
+		Data: gin.H{
+			"realtime":      stats.GetRealtimeStats(minutes),
+			"today_by_hour": stats.GetTodayByHour(),
+		},
+	})
+}
+
+func (h *Handler) GetErrorStats(c *gin.Context) {
+	group := c.Query("group")
+	platform := c.Query("platform")
+	hours := 24
+	if h := c.Query("hours"); h != "" {
+		fmt.Sscanf(h, "%d", &hours)
+		if hours < 1 || hours > 168 {
+			hours = 24
+		}
+	}
+	limit := 20
+	if l := c.Query("limit"); l != "" {
+		fmt.Sscanf(l, "%d", &limit)
+		if limit < 1 || limit > 100 {
+			limit = 20
+		}
+	}
+
+	c.JSON(http.StatusOK, adminResponse{
+		Success: true,
+		Data: gin.H{
+			"by_code": stats.GetErrorStats(group, platform, hours),
+			"recent":  stats.GetRecentErrors(limit),
+		},
+	})
+}
+
+func (h *Handler) GetActiveSessions(c *gin.Context) {
+	ctx := context.Background()
+	tokens, err := cache.SMembers(ctx, "admin:sessions:active")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, adminErrorResponse{
+			Success: false,
+			Code:    "DB_ERROR",
+			Message: "Failed to fetch sessions",
+		})
+		return
+	}
+
+	sessions := []gin.H{}
+	for _, token := range tokens {
+		raw, err := cache.Get(ctx, "admin:session:"+token)
+		if err != nil {
+			// session sudah expired, skip
+			continue
+		}
+		var data AdminSessionData
+		if err := json.Unmarshal([]byte(raw), &data); err != nil {
+			continue
+		}
+		sessions = append(sessions, gin.H{
+			"session_id": data.SessionID,
+			"ip_address": data.IPAddress,
+			"user_agent": data.UserAgent,
+			"created_at": data.CreatedAt,
+			"expires_at": data.ExpiresAt,
+		})
+	}
+
+	c.JSON(http.StatusOK, adminResponse{
+		Success: true,
+		Data: gin.H{
+			"total":    len(sessions),
+			"sessions": sessions,
+		},
+	})
+}
+
+func (h *Handler) RevokeSession(c *gin.Context) {
+	sessionID := c.Param("sessionId")
+	ctx := context.Background()
+	cache.Del(ctx, "admin:session:"+sessionID)
+	cache.SRem(ctx, "admin:sessions:active", sessionID)
+	c.JSON(http.StatusOK, adminMessageResponse{
+		Success: true,
+		Message: "Session revoked",
+	})
+}
+
+func (h *Handler) GetSystemQueue(c *gin.Context) {
+	c.JSON(http.StatusOK, adminResponse{
+		Success: true,
+		Data: gin.H{
+			"hls_download": gin.H{
+				"current": limiter.HLSDownload.Current(),
+				"max":     limiter.HLSDownload.Max(),
+			},
+			"direct_stream": gin.H{
+				"current": limiter.DirectStream.Current(),
+				"max":     limiter.DirectStream.Max(),
+			},
 		},
 	})
 }

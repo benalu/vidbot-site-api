@@ -73,6 +73,7 @@ func (h *Handler) Extract(c *gin.Context) {
 	result, err := h.service.Extract(req.URL)
 	if err != nil {
 		slog.Error("extract failed", "group", "vidhub", "platform", "kingbokeptv", "error", err)
+		stats.TrackError(c, "vidhub", "kingbokeptv", "EXTRACTION_FAILED")
 		response.ErrorWithCode(c, 500, "EXTRACTION_FAILED", "Unable to process the requested URL. The content may be unavailable or the link has expired.")
 		return
 	}

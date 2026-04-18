@@ -38,14 +38,6 @@ func NewHandler(masterKey, cloudConvertKey, convertioKey string, workerURLs []st
 }
 
 func (h *Handler) Check(c *gin.Context) {
-	if c.GetHeader("X-Master-Key") != h.masterKey {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"success": false,
-			"code":    "UNAUTHORIZED",
-			"message": "Invalid key.",
-		})
-		return
-	}
 
 	// jalankan semua check secara paralel
 	type checkResult struct {
@@ -171,6 +163,27 @@ func (h *Handler) Check(c *gin.Context) {
 // =====================
 // Individual Checks
 // =====================
+
+func (h *Handler) CheckPublic(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	redisOK := cache.Ping(ctx) == nil
+	status := "ok"
+	if !redisOK {
+		status = "degraded"
+	}
+
+	code := http.StatusOK
+	if status == "degraded" {
+		code = http.StatusServiceUnavailable
+	}
+
+	c.JSON(code, gin.H{
+		"status":    status,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
 
 func checkRedis() string {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

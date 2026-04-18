@@ -66,9 +66,9 @@ func Setup(r *gin.Engine, cfg *config.Config) {
 		streamHandler.Stream(c, cfg.StreamSecret, cfg.ToolsDir)
 	})
 
-	setupHealth(r, cfg)
+	healthHandler := setupHealth(r, cfg)
 	setupAuth(r, cfg)
-	setupAdmin(r, cfg)
+	setupAdmin(r, cfg, healthHandler)
 	setupIPTV(r, cfg)
 	setupContent(r, cfg, contentProviders)
 	setupVidhub(r, cfg, proxyClient)

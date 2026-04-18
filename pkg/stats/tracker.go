@@ -77,6 +77,7 @@ func cleanupScheduler() {
 		next := time.Date(now.Year(), now.Month(), now.Day()+1, 2, 0, 0, 0, now.Location())
 		time.Sleep(time.Until(next))
 		Cleanup(90)
+		ensurePartitionExists(DB)
 	}
 }
 
