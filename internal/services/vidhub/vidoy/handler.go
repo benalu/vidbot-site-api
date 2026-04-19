@@ -37,12 +37,17 @@ func (h *Handler) Extract(c *gin.Context) {
 	stats.Platform(c, "vidhub", "vidoy")
 	var req Request
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, 400, "url is required")
+		response.ErrorWithCode(c, http.StatusBadRequest, "BAD_REQUEST", "URL is required.")
 		return
 	}
 
 	if !validator.IsValidURL(req.URL) || !validator.IsAllowedDomain(req.URL, "vidoy") {
-		response.ErrorWithCode(c, 400, "INVALID_URL", "URL not supported for this endpoint.")
+		slog.Warn("invalid or disallowed url attempt",
+			"group", "vidhub",
+			"platform", "vidoy",
+			"url", req.URL,
+		)
+		response.ErrorWithCode(c, http.StatusBadRequest, "INVALID_URL", "URL not supported for this endpoint.")
 		return
 	}
 

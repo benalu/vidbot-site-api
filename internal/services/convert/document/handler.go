@@ -2,7 +2,7 @@ package document
 
 import (
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"vidbot-api/internal/services/convert/provider"
@@ -60,18 +60,22 @@ func (h *Handler) Convert(c *gin.Context) {
 	req.To = strings.ToLower(strings.TrimPrefix(req.To, "."))
 
 	if verr := convertvalidator.Validate(req.URL, convertvalidator.Document); verr != nil {
+		stats.TrackError(c, "convert", "document", verr.Code)
 		response.ErrorWithCode(c, 400, verr.Code, verr.Message)
 		return
 	}
 
 	result, err := h.service.SubmitAndWait(req.URL, req.From, req.To)
 	if err != nil {
-		log.Printf("[convert] submit error: %v", err)
+		slog.Error("conversion failed", "group", "convert", "category", "document", "error", err)
+		stats.TrackError(c, "convert", "document", "CONVERT_ERROR")
 		response.ErrorWithCode(c, 400, "CONVERT_ERROR", "Conversion failed. Please check that the file format is supported and the URL is accessible.")
 		return
 	}
 
 	if result.Status == "error" {
+		slog.Error("provider conversion failed", "group", "convert", "category", "document", "provider", result.Provider)
+		stats.TrackError(c, "convert", "document", "CONVERT_FAILED")
 		response.ErrorWithCode(c, 500, "CONVERT_FAILED", "Conversion failed on the provider side. Please try again or use a different file.")
 		return
 	}
@@ -95,7 +99,6 @@ func (h *Handler) Convert(c *gin.Context) {
 		h.downloadWorkerURL, h.downloadWorkerSecret, h.workerXORKey,
 		result.DownloadURL, titleWithoutExt, result.Filename, "", ext, "convert",
 	)
-
 	server2 := downloader.GenerateServer2URL(
 		h.appURL, h.streamSecret, downloader.CacheKey("convert", "document", result.DownloadURL),
 		result.DownloadURL, titleWithoutExt, result.Filename, "", ext, "convert",
@@ -155,18 +158,22 @@ func (h *Handler) Upload(c *gin.Context) {
 	}
 
 	if verr := convertvalidator.ValidateUpload(fileData, header.Size, convertvalidator.Document); verr != nil {
+		stats.TrackError(c, "convert", "document", verr.Code)
 		response.ErrorWithCode(c, 400, verr.Code, verr.Message)
 		return
 	}
 
 	result, err := h.service.SubmitAndWaitUpload(fileData, header.Filename, from, to)
 	if err != nil {
-		log.Printf("[convert] upload error: %v", err)
+		slog.Error("upload conversion failed", "group", "convert", "category", "document", "error", err)
+		stats.TrackError(c, "convert", "document", "CONVERT_ERROR")
 		response.ErrorWithCode(c, 400, "CONVERT_ERROR", "Conversion failed. Please check that the file format is supported and try again.")
 		return
 	}
 
 	if result.Status == "error" {
+		slog.Error("provider upload conversion failed", "group", "convert", "category", "document", "provider", result.Provider)
+		stats.TrackError(c, "convert", "document", "CONVERT_FAILED")
 		response.ErrorWithCode(c, 500, "CONVERT_FAILED", "Conversion failed on the provider side. Please try again or use a different file.")
 		return
 	}

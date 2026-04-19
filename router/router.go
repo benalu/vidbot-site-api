@@ -1,7 +1,9 @@
 package router
 
 import (
-	"log"
+	"context"
+	"log/slog"
+	"time"
 	"vidbot-api/config"
 	contentprovider "vidbot-api/internal/services/content/provider"
 	"vidbot-api/internal/services/content/provider/downr"
@@ -45,11 +47,24 @@ func Setup(r *gin.Engine, cfg *config.Config) {
 	})
 
 	// IPTV store
-	if err := iptvstore.Default.Init(); err != nil {
-		log.Printf("[iptv] WARNING: init failed, all /iptv/* endpoints will return empty data: %v", err)
-	} else {
-		log.Println("[iptv] store initialized successfully")
-	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		done := make(chan error, 1)
+		go func() { done <- iptvstore.Default.Init() }()
+
+		select {
+		case err := <-done:
+			if err != nil {
+				slog.Warn("iptv store init failed, all /iptv/* endpoints will return empty data", "error", err)
+			} else {
+				slog.Info("iptv store initialized")
+			}
+		case <-ctx.Done():
+			slog.Warn("iptv store init timeout after 30s, will retry on next auto-refresh cycle")
+		}
+	}()
 
 	// content providers
 	contentProviders := buildContentProviders(contentProxyClient)

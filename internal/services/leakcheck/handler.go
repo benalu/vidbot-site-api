@@ -1,6 +1,7 @@
 package leakcheck
 
 import (
+	"log/slog"
 	"net/http"
 	"strings"
 	"vidbot-api/pkg/leakcheck"
@@ -44,19 +45,32 @@ func (h *Handler) Search(c *gin.Context) {
 	}
 
 	if len(req.Id) < 6 {
+		stats.TrackError(c, "leakcheck", "", "TOO_SHORT")
 		response.ErrorWithCode(c, http.StatusBadRequest, "BAD_REQUEST", "id must be at least 6 characters.")
 		return
 	}
 
 	idLower := strings.ToLower(strings.TrimSpace(req.Id))
 	if _, blocked := blockedTerms[idLower]; blocked {
+		stats.TrackError(c, "leakcheck", "", "BLOCKED_TERM")
 		response.ErrorWithCode(c, http.StatusBadRequest, "BAD_REQUEST", "please use a more specific id.")
 		return
 	}
 
 	results := leakcheck.Default.Search(req.Id)
 
+	if results == nil {
+		slog.Error("leakcheck search failed, db may be down or uninitialized",
+			"group", "leakcheck",
+			"query_length", len(req.Id),
+		)
+		stats.TrackError(c, "leakcheck", "", "DB_ERROR")
+		response.ErrorWithCode(c, http.StatusInternalServerError, "SERVICE_ERROR", "Something went wrong. Please try again later.")
+		return
+	}
+
 	if len(results) == 0 {
+		stats.TrackError(c, "leakcheck", "", "NOT_FOUND")
 		response.ErrorWithCode(c, http.StatusNotFound, "NOT_FOUND", "No results found.")
 		return
 	}

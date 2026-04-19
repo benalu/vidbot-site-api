@@ -85,7 +85,7 @@ func (h *Handler) SearchWindows(c *gin.Context) {
 func (h *Handler) search(c *gin.Context, platform string) {
 	var body map[string]string
 	if err := c.ShouldBindJSON(&body); err != nil {
-		response.ErrorWithCode(c, http.StatusBadRequest, "BAD_REQUEST", "request body tidak valid")
+		response.ErrorWithCode(c, http.StatusBadRequest, "BAD_REQUEST", "Invalid request body.")
 		return
 	}
 
@@ -94,21 +94,34 @@ func (h *Handler) search(c *gin.Context, platform string) {
 		keyword = strings.TrimSpace(body["app"])
 	}
 	if keyword == "" {
-		response.ErrorWithCode(c, http.StatusBadRequest, "BAD_REQUEST", "required name parameter (apk/app) is missing")
+		response.ErrorWithCode(c, http.StatusBadRequest, "BAD_REQUEST", "Search keyword is required. Use the 'app' or 'apk' field.")
 		return
 	}
 	if len(keyword) < 3 {
-		response.ErrorWithCode(c, http.StatusBadRequest, "BAD_REQUEST", "too short keyword, minimum 3 characters")
+		response.ErrorWithCode(c, http.StatusBadRequest, "BAD_REQUEST", "Search keyword must be at least 3 characters.")
 		return
 	}
 
 	apps, err := appstore.Search(platform, keyword)
 	if err != nil {
-		response.ErrorWithCode(c, http.StatusInternalServerError, "DB_ERROR", "gagal membaca database")
+		slog.Error("app search db query failed",
+			"group", "app",
+			"platform", platform,
+			"keyword", keyword,
+			"error", err,
+		)
+		stats.TrackError(c, "app", platform, "DB_ERROR")
+		response.ErrorWithCode(c, http.StatusInternalServerError, "SERVICE_ERROR", "Something went wrong. Please try again later.")
 		return
 	}
 
 	items := h.buildAppItems(c.Request.Context(), apps, platform)
+	if len(items) == 0 {
+		stats.TrackError(c, "app", platform, "NOT_FOUND")
+		// user: clear but not exposing internal state (e.g. "db returned 0 rows")
+		response.ErrorWithCode(c, http.StatusNotFound, "NOT_FOUND", "No apps found matching your search.")
+		return
+	}
 
 	httputil.WriteJSONOK(c, searchResponse{
 		Success:  true,
@@ -134,7 +147,7 @@ func (h *Handler) BrowseWindows(c *gin.Context) {
 func (h *Handler) browseByCategory(c *gin.Context, platform string) {
 	category := strings.TrimSpace(c.Param("category"))
 	if category == "" {
-		response.ErrorWithCode(c, http.StatusBadRequest, "BAD_REQUEST", "category wajib diisi")
+		response.ErrorWithCode(c, http.StatusBadRequest, "BAD_REQUEST", "Category is required.")
 		return
 	}
 
@@ -147,12 +160,22 @@ func (h *Handler) browseByCategory(c *gin.Context, platform string) {
 
 	apps, total, err := appstore.SearchByCategory(platform, category, limit, offset)
 	if err != nil {
-		response.ErrorWithCode(c, http.StatusInternalServerError, "DB_ERROR", "gagal membaca database")
+		slog.Error("app browse by category db query failed",
+			"group", "app",
+			"platform", platform,
+			"category", category,
+			"page", page,
+			"offset", offset,
+			"error", err,
+		)
+		stats.TrackError(c, "app", platform, "DB_ERROR")
+		response.ErrorWithCode(c, http.StatusInternalServerError, "SERVICE_ERROR", "Something went wrong. Please try again later.")
 		return
 	}
 	if total == 0 {
+		stats.TrackError(c, "app", platform, "NOT_FOUND")
 		response.ErrorWithCode(c, http.StatusNotFound, "NOT_FOUND",
-			fmt.Sprintf("category '%s' tidak ditemukan", category))
+			fmt.Sprintf("Category '%s' not found.", category))
 		return
 	}
 
@@ -185,7 +208,13 @@ func (h *Handler) CategoriesWindows(c *gin.Context) {
 func (h *Handler) getCategories(c *gin.Context, platform string) {
 	categories, err := appstore.GetCategories(platform)
 	if err != nil {
-		response.ErrorWithCode(c, http.StatusInternalServerError, "DB_ERROR", "gagal membaca database")
+		slog.Error("app get categories db query failed",
+			"group", "app",
+			"platform", platform,
+			"error", err,
+		)
+		stats.TrackError(c, "app", platform, "DB_ERROR")
+		response.ErrorWithCode(c, http.StatusInternalServerError, "SERVICE_ERROR", "Something went wrong. Please try again later.")
 		return
 	}
 
@@ -211,13 +240,18 @@ func (h *Handler) getCategories(c *gin.Context, platform string) {
 func (h *Handler) Download(c *gin.Context) {
 	key := strings.TrimSpace(c.Query("k"))
 	if key == "" {
-		response.ErrorWithCode(c, http.StatusBadRequest, "BAD_REQUEST", "parameter k wajib diisi")
+		response.ErrorWithCode(c, http.StatusBadRequest, "BAD_REQUEST", "Download key is required.")
 		return
 	}
 
 	rawURL, err := appstore.ResolveURL(key)
 	if err != nil {
-		response.ErrorWithCode(c, http.StatusNotFound, "NOT_FOUND", "link tidak ditemukan atau sudah kedaluwarsa")
+		slog.Warn("app download shortlink not found or expired",
+			"group", "app",
+			"key", key,
+			"error", err,
+		)
+		response.ErrorWithCode(c, http.StatusNotFound, "NOT_FOUND", "Download link not found or has expired.")
 		return
 	}
 
@@ -261,7 +295,14 @@ func (h *Handler) buildDownloadItems(ctx context.Context, a appstore.App, platfo
 	// fetch semua file sekaligus, tanpa filter versi (version = "")
 	files, err := h.cdnResolver.GetOrFetchFiles(ctx, platform, a.Slug, cdnKeyword, "")
 	if err != nil {
-		slog.Error("cdn fetch failed", "group", "app", "name", a.Name, "error", err)
+		slog.Error("cdn fetch failed for app",
+			"group", "app",
+			"platform", platform,
+			"app_name", a.Name,
+			"app_slug", a.Slug,
+			"cdn_keyword", cdnKeyword,
+			"error", err,
+		)
 		return []downloadItem{}
 	}
 
@@ -271,7 +312,14 @@ func (h *Handler) buildDownloadItems(ctx context.Context, a appstore.App, platfo
 	for _, f := range files {
 		masked, err := appstore.MaskURL(f.SignedURL)
 		if err != nil {
-			slog.Error("mask url failed", "group", "app", "file_id", f.FileID, "error", err)
+			slog.Error("failed to mask cdn url",
+				"group", "app",
+				"platform", platform,
+				"app_slug", a.Slug,
+				"file_id", f.FileID,
+				"file_name", f.OriginalName,
+				"error", err,
+			)
 			continue
 		}
 
