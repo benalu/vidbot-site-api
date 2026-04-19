@@ -94,11 +94,11 @@ func (h *Handler) search(c *gin.Context, platform string) {
 		keyword = strings.TrimSpace(body["app"])
 	}
 	if keyword == "" {
-		response.ErrorWithCode(c, http.StatusBadRequest, "BAD_REQUEST", "Search keyword is required. Use the 'app' or 'apk' field.")
+		response.WriteMsg(c, response.ErrBadRequest, "Search keyword is required. Use the 'app' or 'apk' field.")
 		return
 	}
 	if len(keyword) < 3 {
-		response.ErrorWithCode(c, http.StatusBadRequest, "BAD_REQUEST", "Search keyword must be at least 3 characters.")
+		response.WriteMsg(c, response.ErrBadRequest, "Search keyword must be at least 3 characters.")
 		return
 	}
 
@@ -111,7 +111,7 @@ func (h *Handler) search(c *gin.Context, platform string) {
 			"error", err,
 		)
 		stats.TrackError(c, "app", platform, "DB_ERROR")
-		response.ErrorWithCode(c, http.StatusInternalServerError, "SERVICE_ERROR", "Something went wrong. Please try again later.")
+		response.DB(c, "app", platform, err)
 		return
 	}
 
@@ -119,7 +119,7 @@ func (h *Handler) search(c *gin.Context, platform string) {
 	if len(items) == 0 {
 		stats.TrackError(c, "app", platform, "NOT_FOUND")
 		// user: clear but not exposing internal state (e.g. "db returned 0 rows")
-		response.ErrorWithCode(c, http.StatusNotFound, "NOT_FOUND", "No apps found matching your search.")
+		response.WriteMsg(c, response.ErrNotFound, "app/apk not found")
 		return
 	}
 

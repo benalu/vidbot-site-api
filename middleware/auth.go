@@ -12,22 +12,19 @@ func RequireAccessToken(magicString string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := c.GetHeader("X-Access-Token")
 		if token == "" {
-			response.Error(c, 401, "invalid or expired access token")
-			c.Abort()
+			response.Abort(c, response.ErrAccessTokenMissing)
 			return
 		}
 
 		data, exists := c.Get("api_key_data")
 		if !exists {
-			response.Error(c, 401, "invalid or expired access token")
-			c.Abort()
+			response.Abort(c, response.ErrAccessTokenInvalid)
 			return
 		}
 
 		keyData := data.(apikey.Data)
 		if !auth.ValidateToken(token, keyData.KeyHash, magicString) {
-			response.Error(c, 401, "invalid or expired access token")
-			c.Abort()
+			response.Abort(c, response.ErrAccessTokenInvalid)
 			return
 		}
 

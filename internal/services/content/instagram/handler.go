@@ -2,7 +2,6 @@ package instagram
 
 import (
 	"fmt"
-	"log/slog"
 	"vidbot-api/internal/services/content/provider"
 	"vidbot-api/pkg/downloader"
 	"vidbot-api/pkg/httputil"
@@ -45,12 +44,12 @@ func (h *Handler) Extract(c *gin.Context) {
 	stats.Platform(c, "content", "instagram")
 	var req Request
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, 400, "url is required")
+		response.WriteMsg(c, response.ErrBadRequest, "Url is required.")
 		return
 	}
 
 	if !validator.IsValidURL(req.URL) || !validator.IsAllowedDomain(req.URL, "instagram") {
-		response.ErrorWithCode(c, 400, "INVALID_URL", "URL not supported for this endpoint.")
+		response.InvalidURLWarn(c, "content", "instagram", req.URL)
 		return
 	}
 
@@ -84,9 +83,7 @@ func (h *Handler) Extract(c *gin.Context) {
 
 	result, err := h.service.Extract(req.URL)
 	if err != nil {
-		slog.Error("extract failed", "group", "content", "platform", "instagram", "error", err)
-		stats.TrackError(c, "content", "instagram", "EXTRACTION_FAILED")
-		response.ErrorWithCode(c, 500, "EXTRACTION_FAILED", "Unable to process the requested URL. The content may be private, deleted, or temporarily unavailable.")
+		response.Extraction(c, "content", "instagram", err)
 		return
 	}
 

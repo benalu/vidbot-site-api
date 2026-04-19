@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"time"
 	"vidbot-api/pkg/cache"
+	"vidbot-api/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )
@@ -34,22 +35,18 @@ func (h *Handler) Login(c *gin.Context) {
 		Key string `json:"key"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false, "code": "BAD_REQUEST", "message": "key is required",
-		})
+		response.AdminBadRequest(c, "key is required.")
 		return
 	}
 	if req.Key != h.masterKey {
 		time.Sleep(500 * time.Millisecond)
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"success": false, "code": "UNAUTHORIZED", "message": "Invalid credentials",
-		})
+		response.Abort(c, response.ErrAdminUnauthorized)
 		return
 	}
 
 	raw := make([]byte, 32)
 	if _, err := crand.Read(raw); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to generate session"})
+		response.AdminServiceError(c, "generate session token", err)
 		return
 	}
 	token := hex.EncodeToString(raw)
@@ -66,7 +63,7 @@ func (h *Handler) Login(c *gin.Context) {
 	data, _ := json.Marshal(sessionData)
 	ctx := context.Background()
 	if err := cache.Set(ctx, adminSessionPrefix+token, string(data), ttl); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to save session"})
+		response.AdminDB(c, "save session", err)
 		return
 	}
 	cache.SAdd(ctx, adminSessionIndex, token)
@@ -109,12 +106,12 @@ func (h *Handler) Me(c *gin.Context) {
 	ctx := context.Background()
 	raw, err := cache.Get(ctx, adminSessionPrefix+token)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "code": "UNAUTHORIZED", "message": "Session not found"})
+		response.Write(c, response.ErrAdminSessionExpired)
 		return
 	}
 	var data AdminSessionData
 	if err := json.Unmarshal([]byte(raw), &data); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to read session"})
+		response.AdminServiceError(c, "read session", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})

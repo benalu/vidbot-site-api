@@ -1,6 +1,7 @@
 package audio
 
 import (
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -47,7 +48,7 @@ func (h *Handler) Convert(c *gin.Context) {
 	stats.Platform(c, "convert", "audio")
 	var req ConvertRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.ErrorWithCode(c, 400, "BAD_REQUEST", "url, from, and to are required.")
+		response.Write(c, response.ErrBadRequest)
 		return
 	}
 
@@ -60,22 +61,18 @@ func (h *Handler) Convert(c *gin.Context) {
 
 	if verr := convertvalidator.Validate(req.URL, convertvalidator.Audio); verr != nil {
 		stats.TrackError(c, "convert", "audio", verr.Code)
-		response.ErrorWithCode(c, 400, verr.Code, verr.Message)
+		response.WriteMsg(c, response.ErrBadRequest, verr.Message)
 		return
 	}
 
 	result, err := h.service.SubmitAndWait(req.URL, req.From, req.To)
 	if err != nil {
-		slog.Error("conversion failed", "group", "convert", "category", "audio", "error", err)
-		stats.TrackError(c, "convert", "audio", "CONVERT_ERROR")
-		response.ErrorWithCode(c, 400, "CONVERT_ERROR", "Conversion failed. Please check that the file format is supported and the URL is accessible.")
+		response.ConvertErr(c, "audio", err)
 		return
 	}
 
 	if result.Status == "error" {
-		slog.Error("provider conversion failed", "group", "convert", "category", "audio", "provider", result.Provider)
-		stats.TrackError(c, "convert", "audio", "CONVERT_FAILED")
-		response.ErrorWithCode(c, 500, "CONVERT_FAILED", "Conversion failed on the provider side. Please try again or use a different file.")
+		response.Convert(c, "audio", fmt.Errorf("provider %s returned error", result.Provider))
 		return
 	}
 

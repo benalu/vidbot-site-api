@@ -21,7 +21,7 @@ type Handler struct {
 func (h *Handler) Verify(c *gin.Context) {
 	key := c.GetHeader("X-API-Key")
 	if key == "" {
-		response.Error(c, 401, "invalid api key")
+		response.Write(c, response.ErrAPIKeyMissing)
 		return
 	}
 
@@ -30,14 +30,16 @@ func (h *Handler) Verify(c *gin.Context) {
 
 	raw, err := cache.Get(context.Background(), fmt.Sprintf("apikeys:%s", keyHash))
 	if err != nil {
-		response.Error(c, 401, "invalid api key")
+		// key tidak ditemukan di Redis — belum pernah dibuat atau sudah dihapus
+		response.Write(c, response.ErrAPIKeyNotFound)
 		return
 	}
 
 	var data apikey.Data
 	json.Unmarshal([]byte(raw), &data)
 	if !data.Active {
-		response.Error(c, 401, "api key inactive")
+		// key ada tapi sudah dinonaktifkan oleh admin
+		response.Write(c, response.ErrAPIKeyInactive)
 		return
 	}
 

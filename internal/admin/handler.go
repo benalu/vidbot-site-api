@@ -13,6 +13,7 @@ import (
 	"vidbot-api/pkg/apikey"
 	"vidbot-api/pkg/cache"
 	"vidbot-api/pkg/limiter"
+	"vidbot-api/pkg/response"
 	"vidbot-api/pkg/stats"
 
 	"github.com/gin-gonic/gin"
@@ -62,26 +63,18 @@ func (h *Handler) CreateKey(c *gin.Context) {
 	decoder := json.NewDecoder(c.Request.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"code":    "BAD_REQUEST",
-			"message": err.Error(),
-		})
+		response.AdminBadRequest(c, err.Error())
 		return
 	}
 
 	if req.Name == "" || req.Email == "" || req.Quota < 1 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"code":    "BAD_REQUEST",
-			"message": "name, email, dan quota wajib diisi.",
-		})
+		response.AdminBadRequest(c, "name, email, dan quota wajib diisi.")
 		return
 	}
 
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate key"})
+		response.AdminServiceError(c, "generate key", err)
 		return
 	}
 	plainKey := hex.EncodeToString(raw)
@@ -103,7 +96,7 @@ func (h *Handler) CreateKey(c *gin.Context) {
 	ctx := context.Background()
 
 	if err := cache.Set(ctx, fmt.Sprintf("apikeys:%s", keyHash), string(jsonData), 0); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save key"})
+		response.AdminDB(c, "save key", err)
 		return
 	}
 
@@ -126,11 +119,7 @@ func (h *Handler) CreateKey(c *gin.Context) {
 func (h *Handler) RevokeKey(c *gin.Context) {
 
 	if c.Request.ContentLength > 0 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"code":    "BAD_REQUEST",
-			"message": "Request body not allowed.",
-		})
+		response.AdminBadRequest(c, "Request body not allowed.")
 		return
 	}
 
@@ -147,11 +136,7 @@ func (h *Handler) RevokeKey(c *gin.Context) {
 	ctx := context.Background()
 	raw, err := cache.Get(ctx, redisKey)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"success": false,
-			"code":    "NOT_FOUND",
-			"message": "API key not found.",
-		})
+		response.AdminNotFound(c, "API key not found.")
 		return
 	}
 
@@ -236,11 +221,7 @@ func (h *Handler) LookupKey(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil || req.APIKey == "" {
-		c.JSON(http.StatusBadRequest, adminErrorResponse{
-			Success: false,
-			Code:    "BAD_REQUEST",
-			Message: "api_key is required",
-		})
+		response.AdminBadRequest(c, "api_key is required.")
 		return
 	}
 
@@ -253,11 +234,7 @@ func (h *Handler) LookupKey(c *gin.Context) {
 	// ambil data key
 	raw, err := cache.Get(ctx, fmt.Sprintf("apikeys:%s", keyHash))
 	if err != nil {
-		c.JSON(http.StatusNotFound, adminErrorResponse{
-			Success: false,
-			Code:    "NOT_FOUND",
-			Message: "API key not found",
-		})
+		response.AdminNotFound(c, "API key tidak ditemukan.")
 		return
 	}
 
@@ -295,7 +272,7 @@ func (h *Handler) TopUpQuota(c *gin.Context) {
 		Amount int `json:"amount" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.Amount <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "amount is required and must be positive"})
+		response.AdminBadRequest(c, "amount is required and must be positive.")
 		return
 	}
 
@@ -306,7 +283,7 @@ func (h *Handler) TopUpQuota(c *gin.Context) {
 	ctx := context.Background()
 	raw, err := cache.Get(ctx, redisKey)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "key not found"})
+		response.AdminNotFound(c, "API key not found.")
 		return
 	}
 
@@ -410,11 +387,7 @@ func (h *Handler) GetFeatures(c *gin.Context) {
 func (h *Handler) ToggleFeature(c *gin.Context) {
 	group := c.Param("group")
 	if !validGroups[group] {
-		c.JSON(http.StatusBadRequest, adminErrorResponse{
-			Success: false,
-			Code:    "INVALID_GROUP",
-			Message: fmt.Sprintf("Group '%s' is not recognized.", group),
-		})
+		response.AdminInvalidGroup(c, group)
 		return
 	}
 
@@ -422,11 +395,7 @@ func (h *Handler) ToggleFeature(c *gin.Context) {
 		Status string `json:"status"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || (req.Status != "on" && req.Status != "off") {
-		c.JSON(http.StatusBadRequest, adminErrorResponse{
-			Success: false,
-			Code:    "BAD_REQUEST",
-			Message: "status must be 'on' or 'off'",
-		})
+		response.AdminBadRequest(c, "status must be 'on' or 'off'.")
 		return
 	}
 
@@ -444,11 +413,7 @@ func (h *Handler) ToggleFeaturePlatform(c *gin.Context) {
 	platform := c.Param("platform")
 
 	if !isValidPlatform(group, platform) {
-		c.JSON(http.StatusBadRequest, adminErrorResponse{
-			Success: false,
-			Code:    "INVALID_PLATFORM",
-			Message: fmt.Sprintf("Platform '%s' is not valid for group '%s'.", platform, group),
-		})
+		response.AdminInvalidPlatform(c, platform, group)
 		return
 	}
 
@@ -598,11 +563,7 @@ func (h *Handler) GetKeyUsage(c *gin.Context) {
 	ctx := context.Background()
 	raw, err := cache.Get(ctx, fmt.Sprintf("apikeys:%s", keyHash))
 	if err != nil {
-		c.JSON(http.StatusNotFound, adminErrorResponse{
-			Success: false,
-			Code:    "NOT_FOUND",
-			Message: "API key not found.",
-		})
+		response.AdminNotFound(c, "API key not found.")
 		return
 	}
 
@@ -679,11 +640,7 @@ func (h *Handler) GetActiveSessions(c *gin.Context) {
 	ctx := context.Background()
 	tokens, err := cache.SMembers(ctx, "admin:sessions:active")
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, adminErrorResponse{
-			Success: false,
-			Code:    "DB_ERROR",
-			Message: "Failed to fetch sessions",
-		})
+		response.AdminDB(c, "fetch sessions", err)
 		return
 	}
 

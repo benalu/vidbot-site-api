@@ -40,20 +40,20 @@ func (h *Handler) Search(c *gin.Context) {
 	stats.Group(c, "leakcheck")
 	var req SearchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.ErrorWithCode(c, http.StatusBadRequest, "BAD_REQUEST", "id is required.")
+		response.WriteMsg(c, response.ErrBadRequest, "id is missing.")
 		return
 	}
 
 	if len(req.Id) < 6 {
 		stats.TrackError(c, "leakcheck", "", "TOO_SHORT")
-		response.ErrorWithCode(c, http.StatusBadRequest, "BAD_REQUEST", "id must be at least 6 characters.")
+		response.WriteMsg(c, response.ErrBadRequest, "id must be at least 6 characters.")
 		return
 	}
 
 	idLower := strings.ToLower(strings.TrimSpace(req.Id))
 	if _, blocked := blockedTerms[idLower]; blocked {
 		stats.TrackError(c, "leakcheck", "", "BLOCKED_TERM")
-		response.ErrorWithCode(c, http.StatusBadRequest, "BAD_REQUEST", "please use a more specific id.")
+		response.Write(c, response.ErrBadRequest)
 		return
 	}
 
@@ -65,13 +65,13 @@ func (h *Handler) Search(c *gin.Context) {
 			"query_length", len(req.Id),
 		)
 		stats.TrackError(c, "leakcheck", "", "DB_ERROR")
-		response.ErrorWithCode(c, http.StatusInternalServerError, "SERVICE_ERROR", "Something went wrong. Please try again later.")
+		response.Write(c, response.ErrServiceError)
 		return
 	}
 
 	if len(results) == 0 {
 		stats.TrackError(c, "leakcheck", "", "NOT_FOUND")
-		response.ErrorWithCode(c, http.StatusNotFound, "NOT_FOUND", "No results found.")
+		response.WriteMsg(c, response.ErrNotFound, "id not found")
 		return
 	}
 

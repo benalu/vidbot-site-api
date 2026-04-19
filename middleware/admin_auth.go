@@ -1,8 +1,8 @@
 package middleware
 
 import (
-	"net/http"
 	"vidbot-api/internal/admin"
+	"vidbot-api/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )
@@ -14,22 +14,14 @@ func RequireAdminAuth(masterKey string) gin.HandlerFunc {
 				c.Next()
 				return
 			}
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"success": false,
-				"code":    "UNAUTHORIZED",
-				"message": "Invalid master key.",
-			})
+			response.Abort(c, response.ErrAdminUnauthorized)
 			return
 		}
 
 		if token := c.GetHeader("X-Admin-Session"); token != "" {
 			sessionData, err := admin.ValidateAdminSession(token)
 			if err != nil {
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-					"success": false,
-					"code":    "SESSION_EXPIRED",
-					"message": "Session expired or invalid. Please login again.",
-				})
+				response.Abort(c, response.ErrAdminSessionExpired)
 				return
 			}
 			c.Set("admin_session", sessionData)
@@ -37,10 +29,6 @@ func RequireAdminAuth(masterKey string) gin.HandlerFunc {
 			return
 		}
 
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-			"success": false,
-			"code":    "UNAUTHORIZED",
-			"message": "Authentication required. Use X-Master-Key or X-Admin-Session.",
-		})
+		response.Abort(c, response.ErrAdminUnauthorized)
 	}
 }

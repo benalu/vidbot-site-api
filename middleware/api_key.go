@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"vidbot-api/pkg/apikey"
 	"vidbot-api/pkg/cache"
+	"vidbot-api/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )
@@ -16,11 +17,7 @@ func RequireAPIKey() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		key := c.GetHeader("X-API-Key")
 		if key == "" {
-			c.AbortWithStatusJSON(401, gin.H{
-				"success": false,
-				"code":    "UNAUTHORIZED",
-				"message": "API key is required.",
-			})
+			response.Abort(c, response.ErrAPIKeyMissing)
 			return
 		}
 
@@ -30,32 +27,20 @@ func RequireAPIKey() gin.HandlerFunc {
 		ctx := context.Background()
 		raw, err := cache.Get(ctx, fmt.Sprintf("apikeys:%s", keyHash))
 		if err != nil {
-			c.AbortWithStatusJSON(401, gin.H{
-				"success": false,
-				"code":    "UNAUTHORIZED",
-				"message": "Invalid API key.",
-			})
+			response.Abort(c, response.ErrAPIKeyNotFound)
 			return
 		}
 
 		var data apikey.Data
 		if err := json.Unmarshal([]byte(raw), &data); err != nil || !data.Active {
-			c.AbortWithStatusJSON(401, gin.H{
-				"success": false,
-				"code":    "UNAUTHORIZED",
-				"message": "API key is inactive or invalid.",
-			})
+			response.Abort(c, response.ErrAPIKeyInactive)
 			return
 		}
 
 		quotaKey := fmt.Sprintf("apikeys:quota:%s", keyHash)
 		allowed, err := cache.AtomicQuotaCheck(ctx, quotaKey, data.Quota)
 		if err != nil || !allowed {
-			c.AbortWithStatusJSON(429, gin.H{
-				"success": false,
-				"code":    "QUOTA_EXCEEDED",
-				"message": "Quota habis, silakan top-up.",
-			})
+			response.Abort(c, response.ErrQuotaExceeded)
 			return
 		}
 
@@ -68,11 +53,7 @@ func RequireAPIKeyFromQuery() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		key := c.Query("key")
 		if key == "" {
-			c.AbortWithStatusJSON(401, gin.H{
-				"success": false,
-				"code":    "UNAUTHORIZED",
-				"message": "API key is required.",
-			})
+			response.Abort(c, response.ErrUnauthorized)
 			return
 		}
 
@@ -82,32 +63,20 @@ func RequireAPIKeyFromQuery() gin.HandlerFunc {
 		ctx := context.Background()
 		raw, err := cache.Get(ctx, fmt.Sprintf("apikeys:%s", keyHash))
 		if err != nil {
-			c.AbortWithStatusJSON(401, gin.H{
-				"success": false,
-				"code":    "UNAUTHORIZED",
-				"message": "Invalid API key.",
-			})
+			response.Abort(c, response.ErrUnauthorized)
 			return
 		}
 
 		var data apikey.Data
 		if err := json.Unmarshal([]byte(raw), &data); err != nil || !data.Active {
-			c.AbortWithStatusJSON(401, gin.H{
-				"success": false,
-				"code":    "UNAUTHORIZED",
-				"message": "API key is inactive or invalid.",
-			})
+			response.Abort(c, response.ErrUnauthorized)
 			return
 		}
 
 		quotaKey := fmt.Sprintf("apikeys:quota:%s", keyHash)
 		allowed, err := cache.AtomicQuotaCheck(ctx, quotaKey, data.Quota)
 		if err != nil || !allowed {
-			c.AbortWithStatusJSON(429, gin.H{
-				"success": false,
-				"code":    "QUOTA_EXCEEDED",
-				"message": "Quota habis, silakan top-up.",
-			})
+			response.Abort(c, response.ErrQuotaExceeded)
 			return
 		}
 		c.Set("api_key_data", data)

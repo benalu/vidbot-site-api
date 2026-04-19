@@ -3,6 +3,7 @@ package middleware
 import (
 	"vidbot-api/pkg/apikey"
 	"vidbot-api/pkg/limiter"
+	"vidbot-api/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )
@@ -25,11 +26,7 @@ func RateLimit(group string) gin.HandlerFunc {
 
 		allowed, err := limiter.CheckRateLimit(keyHash, group)
 		if err != nil || !allowed {
-			c.AbortWithStatusJSON(429, gin.H{
-				"success": false,
-				"code":    "RATE_LIMIT_EXCEEDED",
-				"message": "Terlalu banyak request, coba lagi dalam 1 menit.",
-			})
+			response.Abort(c, response.ErrRateLimitExceeded)
 			return
 		}
 
