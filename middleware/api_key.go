@@ -53,7 +53,7 @@ func RequireAPIKeyFromQuery() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		key := c.Query("key")
 		if key == "" {
-			response.Abort(c, response.ErrUnauthorized)
+			response.Abort(c, response.ErrAPIKeyMissing)
 			return
 		}
 
@@ -63,13 +63,13 @@ func RequireAPIKeyFromQuery() gin.HandlerFunc {
 		ctx := context.Background()
 		raw, err := cache.Get(ctx, fmt.Sprintf("apikeys:%s", keyHash))
 		if err != nil {
-			response.Abort(c, response.ErrUnauthorized)
+			response.Abort(c, response.ErrAPIKeyNotFound)
 			return
 		}
 
 		var data apikey.Data
 		if err := json.Unmarshal([]byte(raw), &data); err != nil || !data.Active {
-			response.Abort(c, response.ErrUnauthorized)
+			response.Abort(c, response.ErrAPIKeyInactive)
 			return
 		}
 

@@ -169,13 +169,13 @@ func (h *Handler) browseByCategory(c *gin.Context, platform string) {
 			"error", err,
 		)
 		stats.TrackError(c, "app", platform, "DB_ERROR")
-		response.ErrorWithCode(c, http.StatusInternalServerError, "SERVICE_ERROR", "Something went wrong. Please try again later.")
+		response.DB(c, "app", platform, err)
 		return
 	}
 	if total == 0 {
 		stats.TrackError(c, "app", platform, "NOT_FOUND")
-		response.ErrorWithCode(c, http.StatusNotFound, "NOT_FOUND",
-			fmt.Sprintf("Category '%s' not found.", category))
+		response.WriteMsg(c, response.ErrNotFound,
+			fmt.Sprintf("Category '%s' not found. See /app/%s/category for valid categories.", category, platform))
 		return
 	}
 
@@ -214,7 +214,7 @@ func (h *Handler) getCategories(c *gin.Context, platform string) {
 			"error", err,
 		)
 		stats.TrackError(c, "app", platform, "DB_ERROR")
-		response.ErrorWithCode(c, http.StatusInternalServerError, "SERVICE_ERROR", "Something went wrong. Please try again later.")
+		response.DB(c, "app", platform, err)
 		return
 	}
 
@@ -240,7 +240,7 @@ func (h *Handler) getCategories(c *gin.Context, platform string) {
 func (h *Handler) Download(c *gin.Context) {
 	key := strings.TrimSpace(c.Query("k"))
 	if key == "" {
-		response.ErrorWithCode(c, http.StatusBadRequest, "BAD_REQUEST", "Download key is required.")
+		response.WriteMsg(c, response.ErrBadRequest, "Download key is required.")
 		return
 	}
 
@@ -251,7 +251,7 @@ func (h *Handler) Download(c *gin.Context) {
 			"key", key,
 			"error", err,
 		)
-		response.ErrorWithCode(c, http.StatusNotFound, "NOT_FOUND", "Download link not found or has expired.")
+		response.WriteMsg(c, response.ErrNotFound, "Download link not found or has expired.")
 		return
 	}
 

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"vidbot-api/pkg/iptvstore"
 	"vidbot-api/pkg/mediaresponse"
+	"vidbot-api/pkg/response"
 	"vidbot-api/pkg/stats"
 
 	"github.com/gin-gonic/gin"
@@ -27,20 +28,14 @@ func (h *Handler) GetChannels(c *gin.Context) {
 	streamsOnly := c.Query("streams_only") == "true"
 
 	if !iptvstore.Default.IsValidCountry(country) {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"code":    "INVALID_COUNTRY",
-			"message": fmt.Sprintf("Country code '%s' is not valid.", country),
-		})
+		response.WriteMsg(c, response.ErrBadRequest,
+			fmt.Sprintf("Country code '%s' is not valid. See /iptv/countries for valid values.", country))
 		return
 	}
 
 	if !iptvstore.Default.IsValidCategory(category) {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"code":    "INVALID_CATEGORY",
-			"message": fmt.Sprintf("Category '%s' is not valid.", category),
-		})
+		response.WriteMsg(c, response.ErrBadRequest,
+			fmt.Sprintf("Category '%s' is not valid. See /iptv/categories for valid values.", category))
 		return
 	}
 
@@ -220,20 +215,14 @@ func detectStreamFormat(rawURL string) string {
 // VLC akan fetch SMIL sendiri dengan header yang benar sehingga token selalu fresh.
 func (h *Handler) renderPlaylist(c *gin.Context, country, category string) {
 	if !iptvstore.Default.IsValidCountry(country) {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"code":    "INVALID_COUNTRY",
-			"message": fmt.Sprintf("Country code '%s' is not valid.", country),
-		})
+		response.WriteMsg(c, response.ErrBadRequest,
+			fmt.Sprintf("Country code '%s' is not valid. See /iptv/countries for valid values.", country))
 		return
 	}
 
 	if !iptvstore.Default.IsValidCategory(category) {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"code":    "INVALID_CATEGORY",
-			"message": fmt.Sprintf("Category '%s' is not valid.", category),
-		})
+		response.WriteMsg(c, response.ErrBadRequest,
+			fmt.Sprintf("Category '%s' is not valid. See /iptv/categories for valid values.", category))
 		return
 	}
 

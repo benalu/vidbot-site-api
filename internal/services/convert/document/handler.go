@@ -1,6 +1,7 @@
 package document
 
 import (
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -47,12 +48,12 @@ func (h *Handler) Convert(c *gin.Context) {
 	stats.Platform(c, "convert", "document")
 	var req ConvertRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.ErrorWithCode(c, 400, "BAD_REQUEST", "url, from, and to are required.")
+		response.WriteMsg(c, response.ErrBadRequest, "Fields 'url', 'from', and 'to' are required.")
 		return
 	}
 
 	if !validator.IsValidURL(req.URL) {
-		response.ErrorWithCode(c, 400, "INVALID_URL", "Invalid URL.")
+		response.Write(c, response.ErrInvalidURL)
 		return
 	}
 
@@ -61,7 +62,7 @@ func (h *Handler) Convert(c *gin.Context) {
 
 	if verr := convertvalidator.Validate(req.URL, convertvalidator.Document); verr != nil {
 		stats.TrackError(c, "convert", "document", verr.Code)
-		response.ErrorWithCode(c, 400, verr.Code, verr.Message)
+		response.WriteMsg(c, response.ErrBadRequest, verr.Message)
 		return
 	}
 
@@ -69,14 +70,14 @@ func (h *Handler) Convert(c *gin.Context) {
 	if err != nil {
 		slog.Error("conversion failed", "group", "convert", "category", "document", "error", err)
 		stats.TrackError(c, "convert", "document", "CONVERT_ERROR")
-		response.ErrorWithCode(c, 400, "CONVERT_ERROR", "Conversion failed. Please check that the file format is supported and the URL is accessible.")
+		response.ConvertErr(c, "document", err)
 		return
 	}
 
 	if result.Status == "error" {
 		slog.Error("provider conversion failed", "group", "convert", "category", "document", "provider", result.Provider)
 		stats.TrackError(c, "convert", "document", "CONVERT_FAILED")
-		response.ErrorWithCode(c, 500, "CONVERT_FAILED", "Conversion failed on the provider side. Please try again or use a different file.")
+		response.Convert(c, "document", fmt.Errorf("provider %s returned error", result.Provider))
 		return
 	}
 
@@ -126,20 +127,20 @@ func (h *Handler) Convert(c *gin.Context) {
 func (h *Handler) Upload(c *gin.Context) {
 	stats.Platform(c, "convert", "document")
 	if err := c.Request.ParseMultipartForm(100 << 20); err != nil {
-		response.ErrorWithCode(c, 400, "BAD_REQUEST", "Failed to parse form data.")
+		response.WriteMsg(c, response.ErrBadRequest, "Failed to parse form data.")
 		return
 	}
 
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
-		response.ErrorWithCode(c, 400, "BAD_REQUEST", "file is required.")
+		response.WriteMsg(c, response.ErrBadRequest, "Field 'file' is required.")
 		return
 	}
 	defer file.Close()
 
 	to := strings.ToLower(strings.TrimSpace(c.Request.FormValue("to")))
 	if to == "" {
-		response.ErrorWithCode(c, 400, "BAD_REQUEST", "to is required.")
+		response.WriteMsg(c, response.ErrBadRequest, "Field 'to' is required.")
 		return
 	}
 	to = strings.TrimPrefix(to, ".")
@@ -147,19 +148,19 @@ func (h *Handler) Upload(c *gin.Context) {
 	from := strings.ToLower(strings.TrimSpace(c.Request.FormValue("from")))
 	from = strings.TrimPrefix(from, ".")
 	if from == "" {
-		response.ErrorWithCode(c, 400, "BAD_REQUEST", "from is required.")
+		response.WriteMsg(c, response.ErrBadRequest, "Field 'from' is required.")
 		return
 	}
 
 	fileData, err := io.ReadAll(file)
 	if err != nil {
-		response.ErrorWithCode(c, 500, "READ_ERROR", "Failed to read uploaded file.")
+		response.Write(c, response.ErrServiceError)
 		return
 	}
 
 	if verr := convertvalidator.ValidateUpload(fileData, header.Size, convertvalidator.Document); verr != nil {
 		stats.TrackError(c, "convert", "document", verr.Code)
-		response.ErrorWithCode(c, 400, verr.Code, verr.Message)
+		response.WriteMsg(c, response.ErrBadRequest, verr.Message)
 		return
 	}
 
@@ -167,14 +168,14 @@ func (h *Handler) Upload(c *gin.Context) {
 	if err != nil {
 		slog.Error("upload conversion failed", "group", "convert", "category", "document", "error", err)
 		stats.TrackError(c, "convert", "document", "CONVERT_ERROR")
-		response.ErrorWithCode(c, 400, "CONVERT_ERROR", "Conversion failed. Please check that the file format is supported and try again.")
+		response.ConvertErr(c, "document", err)
 		return
 	}
 
 	if result.Status == "error" {
 		slog.Error("provider upload conversion failed", "group", "convert", "category", "document", "provider", result.Provider)
 		stats.TrackError(c, "convert", "document", "CONVERT_FAILED")
-		response.ErrorWithCode(c, 500, "CONVERT_FAILED", "Conversion failed on the provider side. Please try again or use a different file.")
+		response.Convert(c, "document", fmt.Errorf("provider %s returned error", result.Provider))
 		return
 	}
 
@@ -224,13 +225,13 @@ func (h *Handler) Upload(c *gin.Context) {
 func (h *Handler) Status(c *gin.Context) {
 	jobID := c.Param("job_id")
 	if jobID == "" {
-		response.ErrorWithCode(c, 400, "BAD_REQUEST", "job_id is required.")
+		response.WriteMsg(c, response.ErrBadRequest, "Field 'job_id' is required.")
 		return
 	}
 
 	result, err := h.service.Status(jobID)
 	if err != nil {
-		response.ErrorWithCode(c, 500, "STATUS_ERROR", "Failed to get job status.")
+		response.Write(c, response.ErrServiceError)
 		return
 	}
 

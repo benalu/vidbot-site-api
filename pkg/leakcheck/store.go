@@ -259,9 +259,9 @@ func (s *Store) Search(q string) []Entry {
 		rows, err = conn.QueryContext(ctx,
 			`SELECT source, soft, host, login, password
 			 FROM leakcheck
-			 WHERE LOWER(login) LIKE $1
+			 WHERE LOWER(login) = $1
 			 LIMIT 500`,
-			"%"+lowerQ+"%",
+			lowerQ,
 		)
 	}
 

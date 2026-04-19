@@ -85,7 +85,7 @@ func (h *Handler) Search(c *gin.Context) {
 
 func (h *Handler) validateMasterKey(c *gin.Context) bool {
 	if c.GetHeader("X-Master-Key") != h.masterKey {
-		response.ErrorWithCode(c, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid master key.")
+		response.Write(c, response.ErrAdminUnauthorized)
 		return false
 	}
 	return true
@@ -98,7 +98,7 @@ func (h *Handler) Reload(c *gin.Context) {
 
 	count, err := leakcheck.Default.Reload(h.leakcheckDir)
 	if err != nil {
-		response.ErrorWithCode(c, http.StatusInternalServerError, "RELOAD_FAILED", err.Error())
+		response.AdminServiceError(c, "reload leakcheck", err)
 		return
 	}
 
@@ -122,20 +122,20 @@ func (h *Handler) AddDir(c *gin.Context) {
 		Dir string `json:"dir" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.ErrorWithCode(c, http.StatusBadRequest, "BAD_REQUEST", "dir is required.")
+		response.AdminBadRequest(c, "Field 'dir' is required.")
 		return
 	}
 
 	// keamanan: tolak path traversal
 	if strings.Contains(req.Dir, "..") || strings.ContainsAny(req.Dir, `/\`) {
-		response.ErrorWithCode(c, http.StatusBadRequest, "BAD_REQUEST", "invalid dir.")
+		response.AdminBadRequest(c, "Invalid dir path.")
 		return
 	}
 
 	targetDir := h.leakcheckDir + "/" + req.Dir
 	count, err := leakcheck.Default.AddDir(targetDir)
 	if err != nil {
-		response.ErrorWithCode(c, http.StatusInternalServerError, "ADD_FAILED", err.Error())
+		response.AdminServiceError(c, "add leakcheck dir", err)
 		return
 	}
 

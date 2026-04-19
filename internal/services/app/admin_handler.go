@@ -36,11 +36,11 @@ func (h *Handler) AdminAdd(c *gin.Context) {
 
 	var req addRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.ErrorWithCode(c, http.StatusBadRequest, "BAD_REQUEST", "request body tidak valid")
+		response.AdminBadRequest(c, "request body tidak valid.")
 		return
 	}
 	if err := validateEntry(req.Name, req.Category, req.Version); err != nil {
-		response.ErrorWithCode(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		response.AdminBadRequest(c, err.Error())
 		return
 	}
 
@@ -54,7 +54,7 @@ func (h *Handler) AdminAdd(c *gin.Context) {
 		CDNQuery:     strings.TrimSpace(req.CDNQuery),
 	})
 	if err != nil {
-		response.ErrorWithCode(c, http.StatusInternalServerError, "DB_ERROR", err.Error())
+		response.AdminDB(c, "upsert app", err)
 		return
 	}
 
@@ -75,15 +75,15 @@ func (h *Handler) AdminBulkAdd(c *gin.Context) {
 
 	var req bulkRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.ErrorWithCode(c, http.StatusBadRequest, "BAD_REQUEST", "request body tidak valid")
+		response.AdminBadRequest(c, "request body tidak valid.")
 		return
 	}
 	if len(req.Entries) == 0 {
-		response.ErrorWithCode(c, http.StatusBadRequest, "BAD_REQUEST", "entries tidak boleh kosong")
+		response.AdminBadRequest(c, "entries tidak boleh kosong.")
 		return
 	}
 	if len(req.Entries) > 200 {
-		response.ErrorWithCode(c, http.StatusBadRequest, "BAD_REQUEST", "maksimum 200 entries per request")
+		response.AdminBadRequest(c, "maksimum 200 entries per request.")
 		return
 	}
 
@@ -148,11 +148,11 @@ func (h *Handler) AdminDelete(c *gin.Context) {
 
 	deleted, err := appstore.Delete(platform, slug)
 	if err != nil {
-		response.ErrorWithCode(c, http.StatusInternalServerError, "DB_ERROR", err.Error())
+		response.AdminDB(c, "delete app", err)
 		return
 	}
 	if !deleted {
-		response.ErrorWithCode(c, http.StatusNotFound, "NOT_FOUND", "app tidak ditemukan")
+		response.AdminNotFound(c, "app tidak ditemukan.")
 		return
 	}
 
@@ -169,17 +169,17 @@ func (h *Handler) AdminDeleteVersion(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil || id < 1 {
-		response.ErrorWithCode(c, http.StatusBadRequest, "BAD_REQUEST", "id versi tidak valid")
+		response.AdminBadRequest(c, "id versi tidak valid.")
 		return
 	}
 
 	deleted, err := appstore.DeleteVersion(platform, id)
 	if err != nil {
-		response.ErrorWithCode(c, http.StatusInternalServerError, "DB_ERROR", err.Error())
+		response.AdminDB(c, "delete version", err)
 		return
 	}
 	if !deleted {
-		response.ErrorWithCode(c, http.StatusNotFound, "NOT_FOUND", "versi tidak ditemukan")
+		response.AdminNotFound(c, "versi tidak ditemukan.")
 		return
 	}
 
@@ -202,17 +202,17 @@ func (h *Handler) AdminInvalidateCDNCache(c *gin.Context) {
 
 	var req invalidateCacheRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.ErrorWithCode(c, http.StatusBadRequest, "BAD_REQUEST", "app_slug dan version wajib diisi")
+		response.AdminBadRequest(c, "app_slug dan version wajib diisi.")
 		return
 	}
 
 	if h.cdnResolver == nil {
-		response.ErrorWithCode(c, http.StatusServiceUnavailable, "CDN_NOT_CONFIGURED", "CDN resolver tidak dikonfigurasi")
+		response.WriteMsg(c, response.ErrAdminServiceError, "CDN resolver tidak dikonfigurasi.")
 		return
 	}
 
 	if err := h.cdnResolver.InvalidateCache(c.Request.Context(), platform, req.AppSlug, req.Version); err != nil {
-		response.ErrorWithCode(c, http.StatusInternalServerError, "CACHE_ERROR", err.Error())
+		response.AdminServiceError(c, "invalidate cdn cache", err)
 		return
 	}
 
@@ -251,7 +251,7 @@ func (h *Handler) AdminList(c *gin.Context) {
 	}
 
 	if err != nil {
-		response.ErrorWithCode(c, http.StatusInternalServerError, "DB_ERROR", err.Error())
+		response.AdminDB(c, "list apps", err)
 		return
 	}
 
@@ -323,8 +323,7 @@ func validateEntry(name, category, version string) error {
 func normPlatform(c *gin.Context) (string, bool) {
 	p := strings.ToLower(strings.TrimSpace(c.Param("platform")))
 	if !appstore.IsValidPlatform(p) {
-		response.ErrorWithCode(c, http.StatusBadRequest, "BAD_REQUEST",
-			fmt.Sprintf("platform '%s' tidak valid, gunakan: android, windows", p))
+		response.AdminBadRequest(c, fmt.Sprintf("platform '%s' tidak valid, gunakan: android, windows.", p))
 		return "", false
 	}
 	return p, true

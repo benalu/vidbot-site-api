@@ -3,10 +3,10 @@ package middleware
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"time"
 
 	"vidbot-api/pkg/cache"
+	"vidbot-api/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )
@@ -33,11 +33,7 @@ func AdminLoginRateLimit(limit int, window time.Duration) gin.HandlerFunc {
 		}
 
 		if count > int64(limit) {
-			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
-				"success": false,
-				"code":    "RATE_LIMIT_EXCEEDED",
-				"message": "Too many login attempts. Please try again later.",
-			})
+			response.Abort(c, response.ErrAdminRateLimit)
 			return
 		}
 
