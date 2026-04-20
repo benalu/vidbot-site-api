@@ -135,6 +135,63 @@ func (h *Handler) AdminDelete(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Entry berhasil dihapus."})
 }
 
+// ─── Admin: Edit ──────────────────────────────────────────────────────────────
+
+type editRequest struct {
+	Artist  string `json:"artist,omitempty"`
+	Album   string `json:"album,omitempty"`
+	Year    string `json:"year,omitempty"`
+	Genre   string `json:"genre,omitempty"`
+	Quality string `json:"quality,omitempty"`
+	URL1    string `json:"url_1,omitempty"`
+	URL2    string `json:"url_2,omitempty"`
+	URL3    string `json:"url_3,omitempty"`
+}
+
+func (h *Handler) AdminEdit(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || id < 1 {
+		response.AdminBadRequest(c, "ID tidak valid.")
+		return
+	}
+
+	var req editRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.AdminBadRequest(c, "Request body tidak valid.")
+		return
+	}
+
+	// pastikan ada minimal satu field yang diisi
+	if req.Artist == "" && req.Album == "" && req.Year == "" &&
+		req.Genre == "" && req.Quality == "" &&
+		req.URL1 == "" && req.URL2 == "" && req.URL3 == "" {
+		response.AdminBadRequest(c, "Minimal satu field harus diisi.")
+		return
+	}
+
+	result, err := downloaderstore.UpdateFlac(id, downloaderstore.FlacUpdateEntry{
+		Artist:  strings.TrimSpace(req.Artist),
+		Album:   strings.TrimSpace(req.Album),
+		Year:    strings.TrimSpace(req.Year),
+		Genre:   strings.TrimSpace(req.Genre),
+		Quality: strings.TrimSpace(req.Quality),
+		URL1:    strings.TrimSpace(req.URL1),
+		URL2:    strings.TrimSpace(req.URL2),
+		URL3:    strings.TrimSpace(req.URL3),
+	})
+	if err != nil {
+		response.AdminDB(c, "update flac", err)
+		return
+	}
+	if !result.Found {
+		response.AdminNotFound(c, "Entry tidak ditemukan.")
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
+}
+
 // ─── Admin: List ──────────────────────────────────────────────────────────────
 
 func (h *Handler) AdminList(c *gin.Context) {

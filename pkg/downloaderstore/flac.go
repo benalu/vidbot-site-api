@@ -361,6 +361,86 @@ func DeleteFlac(id int64) (bool, error) {
 	return n > 0, nil
 }
 
+// ─── Update ───────────────────────────────────────────────────────────────────
+
+type FlacUpdateEntry struct {
+	Artist  string
+	Album   string
+	Year    string
+	Genre   string
+	Quality string
+	URL1    string
+	URL2    string
+	URL3    string
+}
+
+type FlacUpdateResult struct {
+	ID     int64  `json:"id"`
+	Artist string `json:"artist"`
+	Album  string `json:"album"`
+	Found  bool   `json:"found"`
+}
+
+func UpdateFlac(id int64, e FlacUpdateEntry) (FlacUpdateResult, error) {
+	db, err := getWriteDB("flac")
+	if err != nil {
+		return FlacUpdateResult{}, err
+	}
+
+	// ambil data lama
+	var cur FlacEntry
+	err = db.QueryRow(
+		`SELECT id, artist, album, year, genre, quality, url_1, url_2, url_3, created_at
+         FROM flac_entries WHERE id = ?`, id,
+	).Scan(&cur.ID, &cur.Artist, &cur.Album, &cur.Year, &cur.Genre, &cur.Quality,
+		&cur.URL1, &cur.URL2, &cur.URL3, &cur.CreatedAt)
+	if err == sql.ErrNoRows {
+		return FlacUpdateResult{Found: false}, nil
+	}
+	if err != nil {
+		return FlacUpdateResult{}, err
+	}
+
+	// merge — field kosong pakai nilai lama
+	if e.Artist != "" {
+		cur.Artist = e.Artist
+	}
+	if e.Album != "" {
+		cur.Album = e.Album
+	}
+	if e.Year != "" {
+		cur.Year = e.Year
+	}
+	if e.Genre != "" {
+		cur.Genre = e.Genre
+	}
+	if e.Quality != "" {
+		cur.Quality = e.Quality
+	}
+	if e.URL1 != "" {
+		cur.URL1 = e.URL1
+	}
+	if e.URL2 != "" {
+		cur.URL2 = e.URL2
+	}
+	if e.URL3 != "" {
+		cur.URL3 = e.URL3
+	}
+
+	_, err = db.Exec(`
+        UPDATE flac_entries
+        SET artist=?, album=?, year=?, genre=?, quality=?, url_1=?, url_2=?, url_3=?
+        WHERE id=?`,
+		cur.Artist, cur.Album, cur.Year, cur.Genre, cur.Quality,
+		cur.URL1, cur.URL2, cur.URL3, id,
+	)
+	if err != nil {
+		return FlacUpdateResult{}, err
+	}
+
+	return FlacUpdateResult{ID: id, Artist: cur.Artist, Album: cur.Album, Found: true}, nil
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 func scanFlacRows(rows *sql.Rows) ([]FlacEntry, error) {

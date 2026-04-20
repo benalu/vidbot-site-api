@@ -644,6 +644,127 @@ func DeleteVersion(platform string, versionID int64) (bool, error) {
 	return n > 0, nil
 }
 
+// ─── Update ───────────────────────────────────────────────────────────────────
+
+type UpdateAppEntry struct {
+	Name         string
+	Category     string
+	Overview     string
+	Requirements string
+	Image        string
+}
+
+type UpdateAppResult struct {
+	Slug  string `json:"slug"`
+	Name  string `json:"name"`
+	Found bool   `json:"found"`
+}
+
+func UpdateApp(platform, slug string, e UpdateAppEntry) (UpdateAppResult, error) {
+	db, err := getWriteDB(platform)
+	if err != nil {
+		return UpdateAppResult{}, err
+	}
+
+	// ambil data lama dulu
+	var currentName, currentCategory, currentOverview, currentRequirements, currentImage string
+	err = db.QueryRow(
+		`SELECT name, category, overview, requirements, image FROM apps WHERE slug = ?`, slug,
+	).Scan(&currentName, &currentCategory, &currentOverview, &currentRequirements, &currentImage)
+	if err == sql.ErrNoRows {
+		return UpdateAppResult{Found: false}, nil
+	}
+	if err != nil {
+		return UpdateAppResult{}, err
+	}
+
+	// merge — field kosong pakai nilai lama
+	newName := currentName
+	if e.Name != "" {
+		newName = e.Name
+	}
+	newCategory := currentCategory
+	if e.Category != "" {
+		newCategory = normalizeCategory(e.Category)
+	}
+	newOverview := currentOverview
+	if e.Overview != "" {
+		newOverview = e.Overview
+	}
+	newRequirements := currentRequirements
+	if e.Requirements != "" {
+		newRequirements = e.Requirements
+	}
+	newImage := currentImage
+	if e.Image != "" {
+		newImage = e.Image
+	}
+
+	_, err = db.Exec(
+		`UPDATE apps SET name=?, category=?, overview=?, requirements=?, image=? WHERE slug=?`,
+		newName, newCategory, newOverview, newRequirements, newImage, slug,
+	)
+	if err != nil {
+		return UpdateAppResult{}, err
+	}
+
+	return UpdateAppResult{Slug: slug, Name: newName, Found: true}, nil
+}
+
+type UpdateVersionEntry struct {
+	URL1 string
+	URL2 string
+	URL3 string
+}
+
+type UpdateVersionResult struct {
+	ID    int64 `json:"id"`
+	Found bool  `json:"found"`
+}
+
+func UpdateVersion(platform string, id int64, e UpdateVersionEntry) (UpdateVersionResult, error) {
+	db, err := getWriteDB(platform)
+	if err != nil {
+		return UpdateVersionResult{}, err
+	}
+
+	// ambil data lama
+	var currentURL1, currentURL2, currentURL3 string
+	err = db.QueryRow(
+		`SELECT url_1, url_2, url_3 FROM app_versions WHERE id = ?`, id,
+	).Scan(&currentURL1, &currentURL2, &currentURL3)
+	if err == sql.ErrNoRows {
+		return UpdateVersionResult{Found: false}, nil
+	}
+	if err != nil {
+		return UpdateVersionResult{}, err
+	}
+
+	// merge — field kosong pakai nilai lama
+	newURL1 := currentURL1
+	if e.URL1 != "" {
+		newURL1 = e.URL1
+	}
+	newURL2 := currentURL2
+	if e.URL2 != "" {
+		newURL2 = e.URL2
+	}
+	newURL3 := currentURL3
+	if e.URL3 != "" {
+		newURL3 = e.URL3
+	}
+
+	_, err = db.Exec(
+		`UPDATE app_versions SET url_1=?, url_2=?, url_3=? WHERE id=?`,
+		newURL1, newURL2, newURL3, id,
+	)
+	if err != nil {
+		return UpdateVersionResult{}, err
+	}
+
+	return UpdateVersionResult{ID: id, Found: true}, nil
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 func sanitizeFTS(q string) string {

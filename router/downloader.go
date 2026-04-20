@@ -36,6 +36,7 @@ func setupDownloader(r *gin.Engine, cfg *config.Config) {
 		adminDL.GET("/flac", h.AdminList)
 		adminDL.POST("/flac", h.AdminAdd)
 		adminDL.POST("/flac/bulk", h.AdminBulkAdd)
+		adminDL.PATCH("/flac/:id", h.AdminEdit)
 		adminDL.DELETE("/flac/:id", h.AdminDelete)
 	}
 }

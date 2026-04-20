@@ -187,6 +187,95 @@ func (h *Handler) AdminDeleteVersion(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "versi berhasil dihapus"})
 }
 
+// ─── Admin: Edit App Metadata ─────────────────────────────────────────────────
+
+type editAppRequest struct {
+	Name         string `json:"name,omitempty"`
+	Category     string `json:"category,omitempty"`
+	Overview     string `json:"overview,omitempty"`
+	Requirements string `json:"requirements,omitempty"`
+	Image        string `json:"image,omitempty"`
+}
+
+func (h *Handler) AdminEdit(c *gin.Context) {
+	platform, ok := normPlatform(c)
+	if !ok {
+		return
+	}
+	slug := c.Param("slug")
+
+	var req editAppRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.AdminBadRequest(c, "request body tidak valid.")
+		return
+	}
+
+	result, err := appstore.UpdateApp(platform, slug, appstore.UpdateAppEntry{
+		Name:         strings.TrimSpace(req.Name),
+		Category:     strings.TrimSpace(req.Category),
+		Overview:     strings.TrimSpace(req.Overview),
+		Requirements: strings.TrimSpace(req.Requirements),
+		Image:        strings.TrimSpace(req.Image),
+	})
+	if err != nil {
+		response.AdminDB(c, "update app", err)
+		return
+	}
+	if !result.Found {
+		response.AdminNotFound(c, "app tidak ditemukan.")
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
+}
+
+// ─── Admin: Edit Version URL ──────────────────────────────────────────────────
+
+type editVersionRequest struct {
+	URL1 string `json:"url_1,omitempty"`
+	URL2 string `json:"url_2,omitempty"`
+	URL3 string `json:"url_3,omitempty"`
+}
+
+func (h *Handler) AdminEditVersion(c *gin.Context) {
+	platform, ok := normPlatform(c)
+	if !ok {
+		return
+	}
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || id < 1 {
+		response.AdminBadRequest(c, "id versi tidak valid.")
+		return
+	}
+
+	var req editVersionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.AdminBadRequest(c, "request body tidak valid.")
+		return
+	}
+	if req.URL1 == "" && req.URL2 == "" && req.URL3 == "" {
+		response.AdminBadRequest(c, "minimal satu field url harus diisi.")
+		return
+	}
+
+	result, err := appstore.UpdateVersion(platform, id, appstore.UpdateVersionEntry{
+		URL1: strings.TrimSpace(req.URL1),
+		URL2: strings.TrimSpace(req.URL2),
+		URL3: strings.TrimSpace(req.URL3),
+	})
+	if err != nil {
+		response.AdminDB(c, "update version", err)
+		return
+	}
+	if !result.Found {
+		response.AdminNotFound(c, "versi tidak ditemukan.")
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
+}
+
 // ─── Admin: Invalidate CDN Cache ──────────────────────────────────────────────
 // Gunakan ini kalau file di CDN di-update dan kamu mau paksa refresh signed URL
 
