@@ -4,20 +4,12 @@ import (
 	"vidbot-api/config"
 	apphandler "vidbot-api/internal/services/app"
 	"vidbot-api/middleware"
-	"vidbot-api/pkg/cdnstore"
 
 	"github.com/gin-gonic/gin"
 )
 
 func setupApp(r *gin.Engine, cfg *config.Config) {
-	// CDN resolver — nil kalau tidak dikonfigurasi (graceful degradation)
-	var cdnResolver *cdnstore.Resolver
-	if cfg.CDNAPIKey != "" {
-		cdnClient := cdnstore.NewClient(cfg.CDNAPIKey, cfg.CDNFolderID)
-		cdnResolver = cdnstore.NewResolver(cdnClient)
-	}
-
-	h := apphandler.NewHandler(cfg.AppURL, cdnResolver)
+	h := apphandler.NewHandler(cfg.AppURL)
 
 	// ── Public search ─────────────────────────────────────────────────────────
 	appGroup := r.Group("/app",
@@ -46,6 +38,5 @@ func setupApp(r *gin.Engine, cfg *config.Config) {
 		adminApp.POST("/:platform/bulk", h.AdminBulkAdd)
 		adminApp.DELETE("/:platform/:slug", h.AdminDelete)
 		adminApp.DELETE("/:platform/versions/:id", h.AdminDeleteVersion)
-		adminApp.POST("/:platform/cdn/invalidate", h.AdminInvalidateCDNCache)
 	}
 }

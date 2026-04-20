@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 	"vidbot-api/pkg/appstore"
-	"vidbot-api/pkg/cdnstore"
 	"vidbot-api/pkg/response"
 
 	"github.com/gin-gonic/gin"
@@ -21,11 +20,9 @@ type addRequest struct {
 	Requirements string `json:"requirements"`
 	Image        string `json:"image"`
 	Version      string `json:"version"`
-	// CDNQuery opsional: override keyword pencarian di CDN
-	// kosong = pakai nama app
-	// berguna jika nama file di CDN berbeda dari nama app
-	// contoh: app "SpotiFLAC" tapi di CDN nama filenya "Spotiflac-Premium"
-	CDNQuery string `json:"cdn_query,omitempty"`
+	URL1         string `json:"url_1"`
+	URL2         string `json:"url_2,omitempty"`
+	URL3         string `json:"url_3,omitempty"`
 }
 
 func (h *Handler) AdminAdd(c *gin.Context) {
@@ -39,7 +36,7 @@ func (h *Handler) AdminAdd(c *gin.Context) {
 		response.AdminBadRequest(c, "request body tidak valid.")
 		return
 	}
-	if err := validateEntry(req.Name, req.Category, req.Version); err != nil {
+	if err := validateEntry(req.Name, req.Category, req.Version, req.URL1); err != nil {
 		response.AdminBadRequest(c, err.Error())
 		return
 	}
@@ -51,7 +48,9 @@ func (h *Handler) AdminAdd(c *gin.Context) {
 		Requirements: strings.TrimSpace(req.Requirements),
 		Image:        strings.TrimSpace(req.Image),
 		Version:      strings.TrimSpace(req.Version),
-		CDNQuery:     strings.TrimSpace(req.CDNQuery),
+		URL1:         strings.TrimSpace(req.URL1),
+		URL2:         strings.TrimSpace(req.URL2),
+		URL3:         strings.TrimSpace(req.URL3),
 	})
 	if err != nil {
 		response.AdminDB(c, "upsert app", err)
@@ -95,7 +94,7 @@ func (h *Handler) AdminBulkAdd(c *gin.Context) {
 	validationErrs := []gin.H{}
 
 	for i, e := range req.Entries {
-		if err := validateEntry(e.Name, e.Category, e.Version); err != nil {
+		if err := validateEntry(e.Name, e.Category, e.Version, e.URL1); err != nil {
 			validationErrs = append(validationErrs, gin.H{"index": i, "error": err.Error(), "name": e.Name})
 			continue
 		}
@@ -108,7 +107,9 @@ func (h *Handler) AdminBulkAdd(c *gin.Context) {
 				Requirements: strings.TrimSpace(e.Requirements),
 				Image:        strings.TrimSpace(e.Image),
 				Version:      strings.TrimSpace(e.Version),
-				CDNQuery:     strings.TrimSpace(e.CDNQuery),
+				URL1:         strings.TrimSpace(e.URL1),
+				URL2:         strings.TrimSpace(e.URL2),
+				URL3:         strings.TrimSpace(e.URL3),
 			},
 		})
 	}
@@ -194,34 +195,6 @@ type invalidateCacheRequest struct {
 	Version string `json:"version" binding:"required"`
 }
 
-func (h *Handler) AdminInvalidateCDNCache(c *gin.Context) {
-	platform, ok := normPlatform(c)
-	if !ok {
-		return
-	}
-
-	var req invalidateCacheRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.AdminBadRequest(c, "app_slug dan version wajib diisi.")
-		return
-	}
-
-	if h.cdnResolver == nil {
-		response.WriteMsg(c, response.ErrAdminServiceError, "CDN resolver tidak dikonfigurasi.")
-		return
-	}
-
-	if err := h.cdnResolver.InvalidateCache(c.Request.Context(), platform, req.AppSlug, req.Version); err != nil {
-		response.AdminServiceError(c, "invalidate cdn cache", err)
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": fmt.Sprintf("CDN cache untuk '%s' v%s berhasil dihapus. URL baru akan di-fetch pada request berikutnya.", req.AppSlug, req.Version),
-	})
-}
-
 // ─── Admin: List ──────────────────────────────────────────────────────────────
 
 func (h *Handler) AdminList(c *gin.Context) {
@@ -258,7 +231,9 @@ func (h *Handler) AdminList(c *gin.Context) {
 	type versionItem struct {
 		ID        int64  `json:"id"`
 		Version   string `json:"version"`
-		CDNQuery  string `json:"cdn_query,omitempty"`
+		URL1      string `json:"url_1"`
+		URL2      string `json:"url_2,omitempty"`
+		URL3      string `json:"url_3,omitempty"`
 		CreatedAt string `json:"created_at"`
 	}
 	type appAdminItem struct {
@@ -279,7 +254,9 @@ func (h *Handler) AdminList(c *gin.Context) {
 			vers = append(vers, versionItem{
 				ID:        v.ID,
 				Version:   v.Version,
-				CDNQuery:  v.CDNQuery,
+				URL1:      v.URL1,
+				URL2:      v.URL2,
+				URL3:      v.URL3,
 				CreatedAt: v.CreatedAt,
 			})
 		}
@@ -307,7 +284,7 @@ func (h *Handler) AdminList(c *gin.Context) {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-func validateEntry(name, category, version string) error {
+func validateEntry(name, category, version, url1 string) error {
 	if strings.TrimSpace(name) == "" {
 		return fmt.Errorf("name wajib diisi")
 	}
@@ -316,6 +293,9 @@ func validateEntry(name, category, version string) error {
 	}
 	if strings.TrimSpace(version) == "" {
 		return fmt.Errorf("version wajib diisi")
+	}
+	if strings.TrimSpace(url1) == "" {
+		return fmt.Errorf("url_1 wajib diisi")
 	}
 	return nil
 }
@@ -328,7 +308,3 @@ func normPlatform(c *gin.Context) (string, bool) {
 	}
 	return p, true
 }
-
-// normPlatformFromCDN helper untuk inject resolver ke handler yang sudah ada
-// karena Handler tidak embeds platform context
-var _ = (*cdnstore.Resolver)(nil) // compile check

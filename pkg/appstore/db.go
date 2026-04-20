@@ -133,7 +133,9 @@ func migrateDB(db *sql.DB) error {
 			id         INTEGER PRIMARY KEY AUTOINCREMENT,
 			app_id     INTEGER NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
 			version    TEXT    NOT NULL,
-			cdn_query  TEXT    NOT NULL DEFAULT '',
+			url_1      TEXT    NOT NULL DEFAULT '',
+			url_2      TEXT    NOT NULL DEFAULT '',
+			url_3      TEXT    NOT NULL DEFAULT '',
 			created_at TEXT    NOT NULL,
 			UNIQUE(app_id, version)
 		)`,
@@ -185,7 +187,9 @@ type AppVersion struct {
 	ID        int64
 	AppID     int64
 	Version   string
-	CDNQuery  string // override keyword pencarian CDN, kosong = pakai nama app
+	URL1      string
+	URL2      string
+	URL3      string
 	CreatedAt string
 }
 
@@ -386,8 +390,8 @@ func batchGetVersions(db *sql.DB, appIDs []int64) (map[int64][]AppVersion, error
 		args[i] = id
 	}
 	rows, err := db.Query(
-		`SELECT id, app_id, version, cdn_query, created_at FROM (
-			SELECT id, app_id, version, cdn_query, created_at,
+		`SELECT id, app_id, version, url_1, url_2, url_3, created_at FROM (
+			SELECT id, app_id, version, url_1, url_2, url_3, created_at,
 					ROW_NUMBER() OVER (PARTITION BY app_id ORDER BY created_at DESC) AS rn
 			FROM app_versions
 			WHERE app_id IN (`+placeholders+`)
@@ -402,7 +406,7 @@ func batchGetVersions(db *sql.DB, appIDs []int64) (map[int64][]AppVersion, error
 	result := make(map[int64][]AppVersion)
 	for rows.Next() {
 		var v AppVersion
-		if err := rows.Scan(&v.ID, &v.AppID, &v.Version, &v.CDNQuery, &v.CreatedAt); err != nil {
+		if err := rows.Scan(&v.ID, &v.AppID, &v.Version, &v.URL1, &v.URL2, &v.URL3, &v.CreatedAt); err != nil {
 			return nil, err
 		}
 		result[v.AppID] = append(result[v.AppID], v)
@@ -420,9 +424,9 @@ type UpsertEntry struct {
 	Requirements string
 	Image        string
 	Version      string
-	// CDNQuery opsional — override keyword pencarian CDN
-	// kosong = pakai nama app
-	CDNQuery string
+	URL1         string
+	URL2         string
+	URL3         string
 }
 
 type UpsertResult struct {
@@ -479,7 +483,7 @@ func Upsert(platform string, e UpsertEntry) (UpsertResult, error) {
 		appID, _ = res.LastInsertId()
 		existingSlug = slug
 
-		if err := insertVersionTx(tx, appID, e.Version, e.CDNQuery); err != nil {
+		if err := insertVersionTx(tx, appID, e.Version, e.URL1, e.URL2, e.URL3); err != nil {
 			return UpsertResult{}, err
 		}
 		if err := tx.Commit(); err != nil {
@@ -508,7 +512,7 @@ func Upsert(platform string, e UpsertEntry) (UpsertResult, error) {
 			return UpsertResult{}, fmt.Errorf("update image: %w", err)
 		}
 	}
-	if err := insertVersionTx(tx, appID, e.Version, e.CDNQuery); err != nil {
+	if err := insertVersionTx(tx, appID, e.Version, e.URL1, e.URL2, e.URL3); err != nil {
 		return UpsertResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -566,7 +570,7 @@ func BulkUpsert(platform string, entries []UpsertEntry) ([]UpsertResult, map[int
 			}
 			appID, _ = res.LastInsertId()
 			existingSlug = slug
-			if vErr := insertVersionTx(tx, appID, e.Version, e.CDNQuery); vErr != nil {
+			if vErr := insertVersionTx(tx, appID, e.Version, e.URL1, e.URL2, e.URL3); vErr != nil {
 				errs[i] = vErr
 				continue
 			}
@@ -593,7 +597,7 @@ func BulkUpsert(platform string, entries []UpsertEntry) ([]UpsertResult, map[int
 				continue
 			}
 		}
-		if vErr := insertVersionTx(tx, appID, e.Version, e.CDNQuery); vErr != nil {
+		if vErr := insertVersionTx(tx, appID, e.Version, e.URL1, e.URL2, e.URL3); vErr != nil {
 			errs[i] = vErr
 			continue
 		}
@@ -606,10 +610,10 @@ func BulkUpsert(platform string, entries []UpsertEntry) ([]UpsertResult, map[int
 	return results, errs
 }
 
-func insertVersionTx(tx *sql.Tx, appID int64, version, cdnQuery string) error {
+func insertVersionTx(tx *sql.Tx, appID int64, version, url1, url2, url3 string) error {
 	_, err := tx.Exec(
-		`INSERT INTO app_versions (app_id, version, cdn_query, created_at) VALUES (?, ?, ?, ?)`,
-		appID, version, cdnQuery, time.Now().Format(time.RFC3339),
+		`INSERT INTO app_versions (app_id, version, url_1, url_2, url_3, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		appID, version, url1, url2, url3, time.Now().Format(time.RFC3339),
 	)
 	return err
 }

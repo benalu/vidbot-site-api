@@ -143,3 +143,21 @@ func AtomicQuotaCheck(ctx context.Context, key string, limit int) (bool, error) 
 	}
 	return result > 0, nil
 }
+
+func MGetCache(ctx context.Context, keys []string) ([]string, error) {
+	c := cacheClient
+	if c == nil {
+		c = client
+	}
+	vals, err := c.MGet(ctx, keys...).Result()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]string, len(vals))
+	for i, v := range vals {
+		if v != nil {
+			result[i] = v.(string)
+		}
+	}
+	return result, nil
+}
