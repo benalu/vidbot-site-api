@@ -33,6 +33,7 @@ type Config struct {
 	AllowedOrigins       string
 	StatsDSN             string
 	LeakcheckDSN         string
+	KeyVaultSecret       string
 	// CDN stor.co.id
 	CDNAPIKey   string
 	CDNFolderID string // folder ID Android/Windows
@@ -80,6 +81,7 @@ func Load() *Config {
 		AllowedOrigins:       os.Getenv("ALLOWED_ORIGINS"),
 		StatsDSN:             os.Getenv("STATS_DB_DSN"),
 		LeakcheckDSN:         os.Getenv("LEAKCHECK_DB_DSN"),
+		KeyVaultSecret:       os.Getenv("KEY_VAULT_SECRET"),
 	}
 }
 

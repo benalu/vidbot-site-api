@@ -8,10 +8,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 	"vidbot-api/internal/health"
 	"vidbot-api/pkg/apikey"
 	"vidbot-api/pkg/cache"
+	"vidbot-api/pkg/keyvault"
 	"vidbot-api/pkg/limiter"
 	"vidbot-api/pkg/response"
 	"vidbot-api/pkg/stats"
@@ -102,16 +104,26 @@ func (h *Handler) CreateKey(c *gin.Context) {
 
 	cache.SAdd(ctx, "apikeys:index", keyHash)
 
+	// Simpan plain key terenkripsi ke vault (opsional, tergantung KEY_VAULT_SECRET)
+	if err := keyvault.StoreKey(keyHash, plainKey, func(k, v string) error {
+		return cache.Set(ctx, k, v, 0)
+	}); err != nil {
+		// Log warning tapi jangan gagalkan request — key sudah tersimpan
+		// vault hanya fitur tambahan
+		fmt.Printf("WARNING: failed to store key in vault: %v\n", err)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "API key created successfully.",
 		"data": gin.H{
-			"api_key":    plainKey,
-			"name":       data.Name,
-			"email":      data.Email,
-			"active":     data.Active,
-			"quota":      data.Quota,
-			"created_at": data.CreatedAt,
+			"api_key":      plainKey,
+			"name":         data.Name,
+			"email":        data.Email,
+			"active":       data.Active,
+			"quota":        data.Quota,
+			"created_at":   data.CreatedAt,
+			"vault_stored": keyvault.IsReady(), // informasikan ke admin apakah vault aktif
 		},
 	})
 }
@@ -123,21 +135,25 @@ func (h *Handler) RevokeKey(c *gin.Context) {
 		return
 	}
 
-	plainKey := c.Param("key")
-	if plainKey == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "key is required"})
+	keyHash := c.Param("keyHash")
+	if keyHash == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "APIkey is required"})
 		return
 	}
 
-	hash := sha256.Sum256([]byte(plainKey))
-	keyHash := hex.EncodeToString(hash[:])
-	redisKey := fmt.Sprintf("apikeys:%s", keyHash)
-
 	ctx := context.Background()
+	redisKey := fmt.Sprintf("apikeys:%s", keyHash)
 	raw, err := cache.Get(ctx, redisKey)
+
 	if err != nil {
-		response.AdminNotFound(c, "API key not found.")
-		return
+		hash := sha256.Sum256([]byte(keyHash))
+		derivedHash := hex.EncodeToString(hash[:])
+		redisKey = fmt.Sprintf("apikeys:%s", derivedHash)
+		raw, err = cache.Get(ctx, redisKey)
+		if err != nil {
+			response.AdminNotFound(c, "API key not found.")
+			return
+		}
 	}
 
 	var data apikey.Data
@@ -157,6 +173,8 @@ func (h *Handler) ListKeys(c *gin.Context) {
 
 	activeFilter := c.Query("active")
 	emailFilter := c.Query("email")
+	nameFilter := c.Query("name")
+	keyHashFilter := c.Query("key_hash")
 
 	ctx := context.Background()
 	keyHashes, err := cache.SMembers(ctx, "apikeys:index")
@@ -186,7 +204,13 @@ func (h *Handler) ListKeys(c *gin.Context) {
 		if activeFilter == "false" && data.Active {
 			continue
 		}
-		if emailFilter != "" && data.Email != emailFilter {
+		if emailFilter != "" && !strings.Contains(strings.ToLower(data.Email), strings.ToLower(emailFilter)) {
+			continue
+		}
+		if nameFilter != "" && !strings.Contains(strings.ToLower(data.Name), strings.ToLower(nameFilter)) {
+			continue
+		}
+		if keyHashFilter != "" && data.KeyHash != keyHashFilter {
 			continue
 		}
 
@@ -265,9 +289,62 @@ func (h *Handler) LookupKey(c *gin.Context) {
 	})
 }
 
+// RevealKey — endpoint untuk admin melihat plain key
+// Hanya bisa dipanggil dengan X-Master-Key
+// Tidak di-log ke stats, tidak di-audit trail (bisa ditambah nanti)
+func (h *Handler) RevealKey(c *gin.Context) {
+	if !keyvault.IsReady() {
+		c.JSON(http.StatusServiceUnavailable, adminErrorResponse{
+			Success: false,
+			Code:    "VAULT_NOT_CONFIGURED",
+			Message: "Key vault is not configured. Set KEY_VAULT_SECRET in your .env file and restart the server.",
+		})
+		return
+	}
+
+	keyHash := c.Param("keyHash")
+	if keyHash == "" {
+		response.AdminBadRequest(c, "keyHash is required.")
+		return
+	}
+
+	// Verifikasi key memang ada di sistem
+	ctx := context.Background()
+	raw, err := cache.Get(ctx, fmt.Sprintf("apikeys:%s", keyHash))
+	if err != nil {
+		response.AdminNotFound(c, "API key not found.")
+		return
+	}
+	var data apikey.Data
+	json.Unmarshal([]byte(raw), &data)
+
+	// Ambil plain key dari vault
+	plainKey, err := keyvault.RetrieveKey(keyHash, func(k string) (string, error) {
+		return cache.Get(ctx, k)
+	})
+	if err != nil {
+		c.JSON(http.StatusNotFound, adminErrorResponse{
+			Success: false,
+			Code:    "KEY_NOT_IN_VAULT",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, adminResponse{
+		Success: true,
+		Data: gin.H{
+			"key_hash":  keyHash,
+			"name":      data.Name,
+			"email":     data.Email,
+			"plain_key": plainKey,
+		},
+	})
+}
+
 func (h *Handler) TopUpQuota(c *gin.Context) {
 
-	apiKey := c.Param("key")
+	keyHash := c.Param("keyHash")
 	var req struct {
 		Amount int `json:"amount" binding:"required"`
 	}
@@ -276,15 +353,19 @@ func (h *Handler) TopUpQuota(c *gin.Context) {
 		return
 	}
 
-	hash := sha256.Sum256([]byte(apiKey))
-	keyHash := hex.EncodeToString(hash[:])
-	redisKey := fmt.Sprintf("apikeys:%s", keyHash)
-
 	ctx := context.Background()
+	redisKey := fmt.Sprintf("apikeys:%s", keyHash)
 	raw, err := cache.Get(ctx, redisKey)
+
 	if err != nil {
-		response.AdminNotFound(c, "API key not found.")
-		return
+		hash := sha256.Sum256([]byte(keyHash))
+		derivedHash := hex.EncodeToString(hash[:])
+		redisKey = fmt.Sprintf("apikeys:%s", derivedHash)
+		raw, err = cache.Get(ctx, redisKey)
+		if err != nil {
+			response.AdminNotFound(c, "API key not found.")
+			return
+		}
 	}
 
 	var data apikey.Data
@@ -558,23 +639,32 @@ func (h *Handler) GetStats(c *gin.Context) {
 }
 
 func (h *Handler) GetKeyUsage(c *gin.Context) {
-	keyHash := c.Param("key")
+	keyHash := c.Param("keyHash")
 
 	ctx := context.Background()
-	raw, err := cache.Get(ctx, fmt.Sprintf("apikeys:%s", keyHash))
+	redisKey := fmt.Sprintf("apikeys:%s", keyHash)
+	raw, err := cache.Get(ctx, redisKey)
+
 	if err != nil {
-		response.AdminNotFound(c, "API key not found.")
-		return
+		hash := sha256.Sum256([]byte(keyHash))
+		derivedHash := hex.EncodeToString(hash[:])
+		redisKey = fmt.Sprintf("apikeys:%s", derivedHash)
+		raw, err = cache.Get(ctx, redisKey)
+		if err != nil {
+			response.AdminNotFound(c, "API key not found.")
+			return
+		}
 	}
 
 	var data apikey.Data
 	json.Unmarshal([]byte(raw), &data)
 
-	quotaUsedStr, _ := cache.Get(ctx, fmt.Sprintf("apikeys:quota:%s", keyHash))
+	resolvedHash := strings.TrimPrefix(redisKey, "apikeys:")
+	quotaUsedStr, _ := cache.Get(ctx, fmt.Sprintf("apikeys:quota:%s", resolvedHash))
 	used := 0
 	fmt.Sscanf(quotaUsedStr, "%d", &used)
 
-	usagePerGroup := stats.GetKeyUsageByGroup(keyHash)
+	usagePerGroup := stats.GetKeyUsageByGroup(resolvedHash)
 
 	c.JSON(http.StatusOK, adminResponse{
 		Success: true,
@@ -697,5 +787,143 @@ func (h *Handler) GetSystemQueue(c *gin.Context) {
 				"max":     limiter.DirectStream.Max(),
 			},
 		},
+	})
+}
+
+// validProviderGroups — semua key yang ada di InitProviderCache
+var validProviderKeys = map[string][]string{
+	"content": {"spotify", "tiktok", "instagram", "twitter", "threads"},
+	"convert": {"audio", "document", "image", "fonts"},
+}
+
+// defaultProviders — urutan default per kategori
+var defaultProviders = map[string][]string{
+	"content:spotify":   {"downr"},
+	"content:tiktok":    {"downr", "vidown"},
+	"content:instagram": {"downr", "vidown"},
+	"content:twitter":   {"downr", "vidown"},
+	"content:threads":   {"downr", "vidown"},
+	"convert:audio":     {"cloudconvert", "convertio"},
+	"convert:document":  {"cloudconvert", "convertio"},
+	"convert:image":     {"cloudconvert", "convertio"},
+	"convert:fonts":     {"cloudconvert", "convertio"},
+}
+
+func (h *Handler) GetProviders(c *gin.Context) {
+	ctx := context.Background()
+	result := gin.H{}
+
+	for group, categories := range validProviderKeys {
+		groupData := gin.H{}
+		for _, category := range categories {
+			key := fmt.Sprintf("%s:provider:%s", group, category)
+			names, err := cache.LRange(ctx, key)
+			if err != nil || len(names) == 0 {
+				names = defaultProviders[key]
+			}
+			groupData[category] = names
+		}
+		result[group] = groupData
+	}
+
+	c.JSON(http.StatusOK, adminResponse{Success: true, Data: result})
+}
+
+func (h *Handler) UpdateProviderOrder(c *gin.Context) {
+	group := c.Param("group")
+	category := c.Param("category")
+
+	categories, ok := validProviderKeys[group]
+	if !ok {
+		response.AdminBadRequest(c, fmt.Sprintf("Group '%s' tidak valid.", group))
+		return
+	}
+	validCat := false
+	for _, cat := range categories {
+		if cat == category {
+			validCat = true
+			break
+		}
+	}
+	if !validCat {
+		response.AdminBadRequest(c, fmt.Sprintf("Category '%s' tidak valid untuk group '%s'.", category, group))
+		return
+	}
+
+	var req struct {
+		Order []string `json:"order"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || len(req.Order) == 0 {
+		response.AdminBadRequest(c, "Field 'order' wajib diisi dan tidak boleh kosong.")
+		return
+	}
+
+	// Validasi nama provider yang masuk akal
+	validProviderNames := map[string]bool{
+		"downr": true, "vidown": true,
+		"cloudconvert": true, "convertio": true,
+	}
+	for _, name := range req.Order {
+		if !validProviderNames[name] {
+			response.AdminBadRequest(c, fmt.Sprintf("Provider '%s' tidak dikenali.", name))
+			return
+		}
+	}
+
+	ctx := context.Background()
+	key := fmt.Sprintf("%s:provider:%s", group, category)
+
+	if err := cache.Del(ctx, key); err != nil {
+		response.AdminDB(c, "delete provider key", err)
+		return
+	}
+
+	// RPush menerima variadic interface{}
+	vals := make([]interface{}, len(req.Order))
+	for i, v := range req.Order {
+		vals[i] = v
+	}
+	if err := cache.RPush(ctx, key, vals...); err != nil {
+		response.AdminDB(c, "set provider order", err)
+		return
+	}
+
+	// Provider cache akan auto-refresh dalam 5 menit, tapi kita force refresh sekarang
+	// Caranya: cache.InitProviderCache sudah ada goroutine-nya, kita tidak bisa force dari sini
+	// Cukup informasikan ke user bahwa perubahan aktif dalam maks 5 menit
+
+	c.JSON(http.StatusOK, adminResponse{
+		Success: true,
+		Data: gin.H{
+			"key":   key,
+			"order": req.Order,
+			"note":  "Changes will be active within 5 minutes (next provider cache refresh cycle).",
+		},
+	})
+}
+
+func (h *Handler) ResetProviderOrder(c *gin.Context) {
+	group := c.Param("group")
+	category := c.Param("category")
+
+	key := fmt.Sprintf("%s:provider:%s", group, category)
+	defaults, ok := defaultProviders[key]
+	if !ok {
+		response.AdminBadRequest(c, fmt.Sprintf("No default found for '%s'.", key))
+		return
+	}
+
+	ctx := context.Background()
+	cache.Del(ctx, key)
+
+	vals := make([]interface{}, len(defaults))
+	for i, v := range defaults {
+		vals[i] = v
+	}
+	cache.RPush(ctx, key, vals...)
+
+	c.JSON(http.StatusOK, adminResponse{
+		Success: true,
+		Data:    gin.H{"key": key, "order": defaults},
 	})
 }

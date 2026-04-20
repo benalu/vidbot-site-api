@@ -16,6 +16,7 @@ import (
 	"vidbot-api/pkg/appstore"
 	"vidbot-api/pkg/cache"
 	"vidbot-api/pkg/downloader"
+	"vidbot-api/pkg/keyvault"
 	"vidbot-api/pkg/leakcheck"
 	"vidbot-api/pkg/logger"
 	"vidbot-api/pkg/stats"
@@ -46,6 +47,13 @@ func main() {
 	if cfg.CacheRedisURL != "" {
 		cache.InitCache(cfg.CacheRedisURL)
 		slog.Info("cache redis initialized", "separate", true)
+	}
+
+	keyvault.Init(cfg.KeyVaultSecret)
+	if keyvault.IsReady() {
+		slog.Info("key vault initialized — plain keys will be stored encrypted")
+	} else {
+		slog.Warn("key vault not configured (KEY_VAULT_SECRET empty) — RevealKey will not work")
 	}
 
 	dataDir := cfg.DataDir

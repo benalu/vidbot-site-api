@@ -15,6 +15,6 @@ func setupHealth(r *gin.Engine, cfg *config.Config) *health.Handler {
 		cfg.WorkerURLs,
 		cfg.WorkerSecret,
 	)
-	r.GET("/health", healthHandler.Check)
+	r.GET("/health", healthHandler.CheckPublic)
 	return healthHandler
 }
