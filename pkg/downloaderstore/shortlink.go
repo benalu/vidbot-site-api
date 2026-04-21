@@ -14,8 +14,8 @@ import (
 const (
 	dlSlPrefix    = "dl:sl:"
 	dlSlIdxPrefix = "dl:sl:idx:"
-	dlSlTTL       = 5 * 24 * time.Hour
-	dlMemCacheTTL = 4 * 24 * time.Hour
+	dlSlTTL       = 24 * time.Hour
+	dlMemCacheTTL = 20 * time.Hour
 )
 
 type dlMemEntry struct {

@@ -391,19 +391,21 @@ func (h *Handler) TopUpQuota(c *gin.Context) {
 
 // validGroups — daftar group yang bisa di-toggle
 var validGroups = map[string]bool{
-	"content":   true,
-	"convert":   true,
-	"iptv":      true,
-	"vidhub":    true,
-	"leakcheck": true,
-	"app":       true,
+	"content":    true,
+	"convert":    true,
+	"iptv":       true,
+	"vidhub":     true,
+	"leakcheck":  true,
+	"app":        true,
+	"downloader": true,
 }
 
 var validPlatforms = map[string][]string{
-	"content": {"spotify", "tiktok", "instagram", "twitter", "threads"},
-	"vidhub":  {"videb", "vidoy", "vidbos", "vidarato", "vidnest", "kingbokeptv"},
-	"convert": {"audio", "document", "image", "fonts"},
-	"app":     {"android", "windows"},
+	"content":    {"spotify", "tiktok", "instagram", "twitter", "threads"},
+	"vidhub":     {"videb", "vidoy", "vidbos", "vidarato", "vidnest", "kingbokeptv"},
+	"convert":    {"audio", "document", "image", "fonts"},
+	"app":        {"android", "windows"},
+	"downloader": {"flac"},
 }
 
 func isValidPlatform(group, platform string) bool {

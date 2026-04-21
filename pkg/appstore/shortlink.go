@@ -14,8 +14,8 @@ import (
 const (
 	appSlPrefix    = "app:sl:"
 	appSlIdxPrefix = "app:sl:idx:"
-	appSlTTL       = 5 * 24 * time.Hour
-	memCacheTTL    = 4 * 24 * time.Hour
+	appSlTTL       = 24 * time.Hour
+	memCacheTTL    = 20 * time.Hour
 )
 
 type memEntry struct {

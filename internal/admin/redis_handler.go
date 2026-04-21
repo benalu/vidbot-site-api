@@ -160,6 +160,7 @@ func getKeySummary(ctx context.Context) map[string]int64 {
 		"vidhub_cache":  "vidhub:*",
 		"shortlinks":    "sl:*",
 		"app_shortlink": "app:sl:*",
+		"dl_shortlink":  "dl:sl:*",
 		"cdn_cache":     "cdn:app:*",
 		"features":      "feature:*",
 		"providers":     "content:provider:*",

@@ -8,12 +8,13 @@ import (
 )
 
 var endpointLimits = map[string]int{
-	"content":   10,
-	"convert":   20,
-	"vidhub":    30,
-	"iptv":      60,
-	"leakcheck": 5,
-	"app":       30,
+	"content":    10,
+	"convert":    20,
+	"vidhub":     30,
+	"iptv":       60,
+	"leakcheck":  5,
+	"app":        30,
+	"downloader": 30,
 }
 
 func CheckRateLimit(keyHash, group string) (bool, error) {

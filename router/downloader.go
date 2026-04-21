@@ -24,6 +24,8 @@ func setupDownloader(r *gin.Engine, cfg *config.Config) {
 			flac.POST("/search", h.Search)
 			flac.GET("/genre", h.Genres)
 			flac.GET("/genre/:genre", h.BrowseByGenre)
+			flac.GET("/artist", h.Artists)
+			flac.GET("/artist/:artist", h.BrowseByArtist)
 		}
 	}
 

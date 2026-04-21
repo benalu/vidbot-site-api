@@ -321,14 +321,6 @@ func (h *Handler) AdminEditVersion(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
 }
 
-// ─── Admin: Invalidate CDN Cache ──────────────────────────────────────────────
-// Gunakan ini kalau file di CDN di-update dan kamu mau paksa refresh signed URL
-
-type invalidateCacheRequest struct {
-	AppSlug string `json:"app_slug" binding:"required"`
-	Version string `json:"version" binding:"required"`
-}
-
 // ─── Admin: List ──────────────────────────────────────────────────────────────
 
 func (h *Handler) AdminList(c *gin.Context) {

@@ -90,6 +90,7 @@ func Setup(r *gin.Engine, cfg *config.Config) {
 	setupConvert(r, cfg, convertProviders)
 	setupLeakcheck(r, cfg)
 	setupApp(r, cfg)
+	setupDownloader(r, cfg)
 }
 
 type contentProviderSet struct {

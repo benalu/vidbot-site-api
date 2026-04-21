@@ -16,6 +16,7 @@ import (
 	"vidbot-api/pkg/appstore"
 	"vidbot-api/pkg/cache"
 	"vidbot-api/pkg/downloader"
+	"vidbot-api/pkg/downloaderstore"
 	"vidbot-api/pkg/keyvault"
 	"vidbot-api/pkg/leakcheck"
 	"vidbot-api/pkg/logger"
@@ -67,6 +68,9 @@ func main() {
 	}
 	if err := appstore.Init(filepath.Join(dataDir, "app")); err != nil {
 		slog.Warn("appstore init failed", "error", err)
+	}
+	if err := downloaderstore.Init(filepath.Join(dataDir, "downloader")); err != nil {
+		slog.Warn("downloaderstore init failed", "error", err)
 	}
 	if err := stats.Init(cfg.StatsDSN); err != nil {
 		slog.Warn("stats db init failed", "error", err)
