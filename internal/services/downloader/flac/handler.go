@@ -47,6 +47,8 @@ type searchResponse struct {
 	Success  bool       `json:"success"`
 	Services string     `json:"services"`
 	Platform string     `json:"platform"`
+	Page     int        `json:"page"`
+	Limit    int        `json:"limit"`
 	Total    int        `json:"total"`
 	Data     []flacItem `json:"data"`
 }
@@ -55,7 +57,7 @@ type browseResponse struct {
 	Success  bool       `json:"success"`
 	Services string     `json:"services"`
 	Platform string     `json:"platform"`
-	Genre    string     `json:"genre"`
+	Filter   string     `json:"filter"`
 	Page     int        `json:"page"`
 	Limit    int        `json:"limit"`
 	Total    int        `json:"total"`
@@ -89,7 +91,14 @@ func (h *Handler) Search(c *gin.Context) {
 		return
 	}
 
-	entries, err := downloaderstore.SearchFlac(keyword)
+	limit := 20
+	page := 1
+	if p, err := strconv.Atoi(body["page"]); err == nil && p > 0 {
+		page = p
+	}
+	offset := (page - 1) * limit
+
+	entries, total, err := downloaderstore.SearchFlacPaged(keyword, limit, offset)
 	if err != nil {
 		slog.Error("flac search failed", "group", "downloader", "platform", "flac", "error", err)
 		stats.TrackError(c, "downloader", "flac", "DB_ERROR")
@@ -108,7 +117,9 @@ func (h *Handler) Search(c *gin.Context) {
 		Success:  true,
 		Services: "downloader",
 		Platform: "flac",
-		Total:    len(items),
+		Page:     page,
+		Limit:    limit,
+		Total:    total,
 		Data:     items,
 	})
 }
@@ -151,7 +162,80 @@ func (h *Handler) BrowseByGenre(c *gin.Context) {
 		Success:  true,
 		Services: "downloader",
 		Platform: "flac",
-		Genre:    genre,
+		Filter:   genre,
+		Page:     page,
+		Limit:    limit,
+		Total:    total,
+		Data:     items,
+	})
+}
+
+// ─── Browse by artist ──────────────────────────────────────────────────────────
+func (h *Handler) Artists(c *gin.Context) {
+	stats.Platform(c, "downloader", "flac")
+
+	artists, err := downloaderstore.GetFlacArtists()
+	if err != nil {
+		slog.Error("flac artists failed", "group", "downloader", "platform", "flac", "error", err)
+		stats.TrackError(c, "downloader", "flac", "DB_ERROR")
+		response.DB(c, "downloader", "flac", err)
+		return
+	}
+
+	type artistsResponse struct {
+		Success  bool                          `json:"success"`
+		Services string                        `json:"services"`
+		Platform string                        `json:"platform"`
+		Total    int                           `json:"total"`
+		Data     []downloaderstore.ArtistCount `json:"data"`
+	}
+
+	httputil.WriteJSONOK(c, artistsResponse{
+		Success:  true,
+		Services: "downloader",
+		Platform: "flac",
+		Total:    len(artists),
+		Data:     artists,
+	})
+}
+
+func (h *Handler) BrowseByArtist(c *gin.Context) {
+	stats.Platform(c, "downloader", "flac")
+
+	artist := strings.TrimSpace(c.Param("artist"))
+	if artist == "" {
+		response.ErrorWithCode(c, http.StatusBadRequest, "BAD_REQUEST", "Artist is required.")
+		return
+	}
+
+	limit := 20
+	page := 1
+	if p, err := strconv.Atoi(c.Query("page")); err == nil && p > 0 {
+		page = p
+	}
+	offset := (page - 1) * limit
+
+	entries, total, err := downloaderstore.SearchFlacByArtist(artist, limit, offset)
+	if err != nil {
+		slog.Error("flac browse by artist failed", "group", "downloader", "platform", "flac", "artist", artist, "error", err)
+		stats.TrackError(c, "downloader", "flac", "DB_ERROR")
+		response.DB(c, "downloader", "flac", err)
+		return
+	}
+	if total == 0 {
+		stats.TrackError(c, "downloader", "flac", "NOT_FOUND")
+		response.WriteMsg(c, response.ErrNotFound,
+			fmt.Sprintf("Artist '%s' not found. See /downloader/flac/artist for valid artists.", artist))
+		return
+	}
+
+	items := h.buildFlacItems(entries)
+
+	httputil.WriteJSONOK(c, browseResponse{
+		Success:  true,
+		Services: "downloader",
+		Platform: "flac",
+		Filter:   artist,
 		Page:     page,
 		Limit:    limit,
 		Total:    total,

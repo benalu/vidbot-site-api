@@ -36,9 +36,10 @@ func setupApp(r *gin.Engine, cfg *config.Config) {
 		adminApp.GET("/:platform", h.AdminList)
 		adminApp.POST("/:platform", h.AdminAdd)
 		adminApp.POST("/:platform/bulk", h.AdminBulkAdd)
+		adminApp.GET("/:platform/:slug", h.AdminGet)
 		adminApp.PATCH("/:platform/:slug", h.AdminEdit)
 		adminApp.DELETE("/:platform/:slug", h.AdminDelete)
-		adminApp.PATCH("/:platform/versions/:id", h.AdminEditVersion)
-		adminApp.DELETE("/:platform/versions/:id", h.AdminDeleteVersion)
+		adminApp.PATCH("/:platform/:slug/versions/:id", h.AdminEditVersion)
+		adminApp.DELETE("/:platform/:slug/versions/:id", h.AdminDeleteVersion)
 	}
 }

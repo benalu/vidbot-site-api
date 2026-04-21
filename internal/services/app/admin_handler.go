@@ -60,6 +60,51 @@ func (h *Handler) AdminAdd(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
 }
 
+func (h *Handler) AdminGet(c *gin.Context) {
+	platform, ok := normPlatform(c)
+	if !ok {
+		return
+	}
+	slug := c.Param("slug")
+
+	app, err := appstore.GetBySlug(platform, slug)
+	if err != nil {
+		response.AdminDB(c, "get app", err)
+		return
+	}
+	if app == nil {
+		response.AdminNotFound(c, "app tidak ditemukan.")
+		return
+	}
+
+	type versionItem struct {
+		ID        int64  `json:"id"`
+		Version   string `json:"version"`
+		URL1      string `json:"url_1"`
+		URL2      string `json:"url_2,omitempty"`
+		URL3      string `json:"url_3,omitempty"`
+		CreatedAt string `json:"created_at"`
+	}
+	vers := make([]versionItem, 0, len(app.Versions))
+	for _, v := range app.Versions {
+		vers = append(vers, versionItem{
+			ID: v.ID, Version: v.Version,
+			URL1: v.URL1, URL2: v.URL2, URL3: v.URL3,
+			CreatedAt: v.CreatedAt,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"slug": app.Slug, "name": app.Name,
+			"category": app.Category, "overview": app.Overview,
+			"requirements": app.Requirements, "image": app.Image,
+			"created_at": app.CreatedAt, "versions": vers,
+		},
+	})
+}
+
 // ─── Admin: Bulk Add ──────────────────────────────────────────────────────────
 
 type bulkRequest struct {

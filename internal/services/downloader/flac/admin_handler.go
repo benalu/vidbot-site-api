@@ -136,16 +136,13 @@ func (h *Handler) AdminDelete(c *gin.Context) {
 }
 
 // ─── Admin: Edit ──────────────────────────────────────────────────────────────
-
-type editRequest struct {
+// AdminEdit — hanya metadata
+type editMetaRequest struct {
 	Artist  string `json:"artist,omitempty"`
 	Album   string `json:"album,omitempty"`
 	Year    string `json:"year,omitempty"`
 	Genre   string `json:"genre,omitempty"`
 	Quality string `json:"quality,omitempty"`
-	URL1    string `json:"url_1,omitempty"`
-	URL2    string `json:"url_2,omitempty"`
-	URL3    string `json:"url_3,omitempty"`
 }
 
 func (h *Handler) AdminEdit(c *gin.Context) {
@@ -156,32 +153,26 @@ func (h *Handler) AdminEdit(c *gin.Context) {
 		return
 	}
 
-	var req editRequest
+	var req editMetaRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.AdminBadRequest(c, "Request body tidak valid.")
 		return
 	}
-
-	// pastikan ada minimal satu field yang diisi
 	if req.Artist == "" && req.Album == "" && req.Year == "" &&
-		req.Genre == "" && req.Quality == "" &&
-		req.URL1 == "" && req.URL2 == "" && req.URL3 == "" {
-		response.AdminBadRequest(c, "Minimal satu field harus diisi.")
+		req.Genre == "" && req.Quality == "" {
+		response.AdminBadRequest(c, "Minimal satu field metadata harus diisi.")
 		return
 	}
 
-	result, err := downloaderstore.UpdateFlac(id, downloaderstore.FlacUpdateEntry{
+	result, err := downloaderstore.UpdateFlacMeta(id, downloaderstore.FlacMetaEntry{
 		Artist:  strings.TrimSpace(req.Artist),
 		Album:   strings.TrimSpace(req.Album),
 		Year:    strings.TrimSpace(req.Year),
 		Genre:   strings.TrimSpace(req.Genre),
 		Quality: strings.TrimSpace(req.Quality),
-		URL1:    strings.TrimSpace(req.URL1),
-		URL2:    strings.TrimSpace(req.URL2),
-		URL3:    strings.TrimSpace(req.URL3),
 	})
 	if err != nil {
-		response.AdminDB(c, "update flac", err)
+		response.AdminDB(c, "update flac meta", err)
 		return
 	}
 	if !result.Found {
@@ -190,6 +181,83 @@ func (h *Handler) AdminEdit(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
+}
+
+// AdminEditLinks — hanya URLs
+type editLinksRequest struct {
+	URL1 string `json:"url_1,omitempty"`
+	URL2 string `json:"url_2,omitempty"`
+	URL3 string `json:"url_3,omitempty"`
+}
+
+func (h *Handler) AdminEditLinks(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || id < 1 {
+		response.AdminBadRequest(c, "ID tidak valid.")
+		return
+	}
+
+	var req editLinksRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.AdminBadRequest(c, "Request body tidak valid.")
+		return
+	}
+	if req.URL1 == "" && req.URL2 == "" && req.URL3 == "" {
+		response.AdminBadRequest(c, "Minimal satu URL harus diisi.")
+		return
+	}
+
+	result, err := downloaderstore.UpdateFlacLinks(id, downloaderstore.FlacLinksEntry{
+		URL1: strings.TrimSpace(req.URL1),
+		URL2: strings.TrimSpace(req.URL2),
+		URL3: strings.TrimSpace(req.URL3),
+	})
+	if err != nil {
+		response.AdminDB(c, "update flac links", err)
+		return
+	}
+	if !result.Found {
+		response.AdminNotFound(c, "Entry tidak ditemukan.")
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
+}
+
+// AdminGet — detail satu entry
+func (h *Handler) AdminGet(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || id < 1 {
+		response.AdminBadRequest(c, "ID tidak valid.")
+		return
+	}
+
+	entry, err := downloaderstore.GetFlacByID(id)
+	if err != nil {
+		response.AdminDB(c, "get flac", err)
+		return
+	}
+	if entry == nil {
+		response.AdminNotFound(c, "Entry tidak ditemukan.")
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"id": entry.ID,
+			"meta": gin.H{
+				"artist": entry.Artist, "album": entry.Album,
+				"year": entry.Year, "genre": entry.Genre, "quality": entry.Quality,
+			},
+			"links": gin.H{
+				"url_1": entry.URL1, "url_2": entry.URL2, "url_3": entry.URL3,
+			},
+			"created_at": entry.CreatedAt,
+		},
+	})
 }
 
 // ─── Admin: List ──────────────────────────────────────────────────────────────

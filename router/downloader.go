@@ -34,9 +34,11 @@ func setupDownloader(r *gin.Engine, cfg *config.Config) {
 	adminDL := r.Group("/admin/downloader", middleware.RequireAdminAuth(cfg.MasterKey))
 	{
 		adminDL.GET("/flac", h.AdminList)
+		adminDL.GET("/flac/:id", h.AdminGet)
 		adminDL.POST("/flac", h.AdminAdd)
 		adminDL.POST("/flac/bulk", h.AdminBulkAdd)
 		adminDL.PATCH("/flac/:id", h.AdminEdit)
+		adminDL.PATCH("/flac/:id/links", h.AdminEditLinks)
 		adminDL.DELETE("/flac/:id", h.AdminDelete)
 	}
 }

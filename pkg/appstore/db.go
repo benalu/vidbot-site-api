@@ -414,6 +414,33 @@ func batchGetVersions(db *sql.DB, appIDs []int64) (map[int64][]AppVersion, error
 	return result, rows.Err()
 }
 
+func GetBySlug(platform, slug string) (*App, error) {
+	db, err := getReadDB(platform)
+	if err != nil {
+		return nil, err
+	}
+
+	var a App
+	err = db.QueryRow(`
+        SELECT id, slug, name, category, overview, requirements, image, created_at
+        FROM apps WHERE slug = ?
+    `, slug).Scan(&a.ID, &a.Slug, &a.Name, &a.Category,
+		&a.Overview, &a.Requirements, &a.Image, &a.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	versionMap, err := batchGetVersions(db, []int64{a.ID})
+	if err != nil {
+		return nil, err
+	}
+	a.Versions = versionMap[a.ID]
+	return &a, nil
+}
+
 // ─── Write ────────────────────────────────────────────────────────────────────
 
 // UpsertEntry — input dari admin, tanpa URL

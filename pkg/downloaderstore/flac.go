@@ -132,6 +132,62 @@ func SearchFlac(keyword string) ([]FlacEntry, error) {
 	return scanFlacRows(rows)
 }
 
+// SearchFlacPaged — versi paged dari SearchFlac yang sudah ada
+func SearchFlacPaged(keyword string, limit, offset int) ([]FlacEntry, int, error) {
+	db, err := getReadDB("flac")
+	if err != nil {
+		return nil, 0, err
+	}
+
+	ftsQuery := sanitizeFTS(keyword) + "*"
+
+	// hitung total dulu
+	var total int
+	err = db.QueryRow(`
+        SELECT COUNT(*)
+        FROM flac_fts ff
+        JOIN flac_entries f ON f.id = ff.rowid
+        WHERE flac_fts MATCH ?
+    `, ftsQuery).Scan(&total)
+	if err != nil {
+		// FTS gagal, fallback ke LIKE
+		kw := "%" + strings.ToLower(keyword) + "%"
+		db.QueryRow(`
+            SELECT COUNT(*) FROM flac_entries
+            WHERE LOWER(artist) LIKE ? OR LOWER(album) LIKE ? OR LOWER(genre) LIKE ?
+        `, kw, kw, kw).Scan(&total)
+	}
+
+	rows, err := db.Query(`
+        SELECT f.id, f.artist, f.album, f.year, f.genre, f.quality,
+               f.url_1, f.url_2, f.url_3, f.created_at
+        FROM flac_fts ff
+        JOIN flac_entries f ON f.id = ff.rowid
+        WHERE flac_fts MATCH ?
+        ORDER BY rank
+        LIMIT ? OFFSET ?
+    `, ftsQuery, limit, offset)
+	if err != nil {
+		// fallback LIKE
+		kw := "%" + strings.ToLower(keyword) + "%"
+		rows, err = db.Query(`
+            SELECT id, artist, album, year, genre, quality,
+                   url_1, url_2, url_3, created_at
+            FROM flac_entries
+            WHERE LOWER(artist) LIKE ? OR LOWER(album) LIKE ? OR LOWER(genre) LIKE ?
+            ORDER BY artist ASC
+            LIMIT ? OFFSET ?
+        `, kw, kw, kw, limit, offset)
+		if err != nil {
+			return nil, 0, err
+		}
+	}
+	defer rows.Close()
+
+	entries, err := scanFlacRows(rows)
+	return entries, total, err
+}
+
 func SearchAllFlac(limit, offset int) ([]FlacEntry, int, error) {
 	db, err := getReadDB("flac")
 	if err != nil {
@@ -150,6 +206,69 @@ func SearchAllFlac(limit, offset int) ([]FlacEntry, int, error) {
 		ORDER BY artist ASC, album ASC
 		LIMIT ? OFFSET ?
 	`, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	entries, err := scanFlacRows(rows)
+	return entries, total, err
+}
+
+type ArtistCount struct {
+	Artist string `json:"artist"`
+	Count  int    `json:"count"`
+}
+
+func GetFlacArtists() ([]ArtistCount, error) {
+	db, err := getReadDB("flac")
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.Query(`
+        SELECT artist, COUNT(*) as count
+        FROM flac_entries
+        GROUP BY artist
+        ORDER BY artist ASC
+    `)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make([]ArtistCount, 0)
+	for rows.Next() {
+		var a ArtistCount
+		if err := rows.Scan(&a.Artist, &a.Count); err != nil {
+			return nil, err
+		}
+		result = append(result, a)
+	}
+	return result, rows.Err()
+}
+
+func SearchFlacByArtist(artist string, limit, offset int) ([]FlacEntry, int, error) {
+	db, err := getReadDB("flac")
+	if err != nil {
+		return nil, 0, err
+	}
+	a := strings.ToLower(strings.TrimSpace(artist))
+
+	var total int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM flac_entries WHERE LOWER(artist) = ?`, a,
+	).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	rows, err := db.Query(`
+        SELECT id, artist, album, year, genre, quality,
+               url_1, url_2, url_3, created_at
+        FROM flac_entries
+        WHERE LOWER(artist) = ?
+        ORDER BY year DESC, album ASC
+        LIMIT ? OFFSET ?
+    `, a, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -381,19 +500,25 @@ type FlacUpdateResult struct {
 	Found  bool   `json:"found"`
 }
 
-func UpdateFlac(id int64, e FlacUpdateEntry) (FlacUpdateResult, error) {
+// Untuk AdminEdit (metadata saja)
+type FlacMetaEntry struct {
+	Artist  string
+	Album   string
+	Year    string
+	Genre   string
+	Quality string
+}
+
+func UpdateFlacMeta(id int64, e FlacMetaEntry) (FlacUpdateResult, error) {
 	db, err := getWriteDB("flac")
 	if err != nil {
 		return FlacUpdateResult{}, err
 	}
 
-	// ambil data lama
 	var cur FlacEntry
-	err = db.QueryRow(
-		`SELECT id, artist, album, year, genre, quality, url_1, url_2, url_3, created_at
-         FROM flac_entries WHERE id = ?`, id,
-	).Scan(&cur.ID, &cur.Artist, &cur.Album, &cur.Year, &cur.Genre, &cur.Quality,
-		&cur.URL1, &cur.URL2, &cur.URL3, &cur.CreatedAt)
+	err = db.QueryRow(`
+        SELECT artist, album, year, genre, quality FROM flac_entries WHERE id = ?
+    `, id).Scan(&cur.Artist, &cur.Album, &cur.Year, &cur.Genre, &cur.Quality)
 	if err == sql.ErrNoRows {
 		return FlacUpdateResult{Found: false}, nil
 	}
@@ -401,7 +526,6 @@ func UpdateFlac(id int64, e FlacUpdateEntry) (FlacUpdateResult, error) {
 		return FlacUpdateResult{}, err
 	}
 
-	// merge — field kosong pakai nilai lama
 	if e.Artist != "" {
 		cur.Artist = e.Artist
 	}
@@ -417,6 +541,40 @@ func UpdateFlac(id int64, e FlacUpdateEntry) (FlacUpdateResult, error) {
 	if e.Quality != "" {
 		cur.Quality = e.Quality
 	}
+
+	_, err = db.Exec(`
+        UPDATE flac_entries SET artist=?, album=?, year=?, genre=?, quality=? WHERE id=?
+    `, cur.Artist, cur.Album, cur.Year, cur.Genre, cur.Quality, id)
+	if err != nil {
+		return FlacUpdateResult{}, err
+	}
+	return FlacUpdateResult{ID: id, Artist: cur.Artist, Album: cur.Album, Found: true}, nil
+}
+
+// Untuk AdminEditLinks (URLs saja)
+type FlacLinksEntry struct {
+	URL1 string
+	URL2 string
+	URL3 string
+}
+
+func UpdateFlacLinks(id int64, e FlacLinksEntry) (FlacUpdateResult, error) {
+	db, err := getWriteDB("flac")
+	if err != nil {
+		return FlacUpdateResult{}, err
+	}
+
+	var cur struct{ Artist, Album, URL1, URL2, URL3 string }
+	err = db.QueryRow(`
+        SELECT artist, album, url_1, url_2, url_3 FROM flac_entries WHERE id = ?
+    `, id).Scan(&cur.Artist, &cur.Album, &cur.URL1, &cur.URL2, &cur.URL3)
+	if err == sql.ErrNoRows {
+		return FlacUpdateResult{Found: false}, nil
+	}
+	if err != nil {
+		return FlacUpdateResult{}, err
+	}
+
 	if e.URL1 != "" {
 		cur.URL1 = e.URL1
 	}
@@ -428,17 +586,35 @@ func UpdateFlac(id int64, e FlacUpdateEntry) (FlacUpdateResult, error) {
 	}
 
 	_, err = db.Exec(`
-        UPDATE flac_entries
-        SET artist=?, album=?, year=?, genre=?, quality=?, url_1=?, url_2=?, url_3=?
-        WHERE id=?`,
-		cur.Artist, cur.Album, cur.Year, cur.Genre, cur.Quality,
-		cur.URL1, cur.URL2, cur.URL3, id,
-	)
+        UPDATE flac_entries SET url_1=?, url_2=?, url_3=? WHERE id=?
+    `, cur.URL1, cur.URL2, cur.URL3, id)
 	if err != nil {
 		return FlacUpdateResult{}, err
 	}
-
 	return FlacUpdateResult{ID: id, Artist: cur.Artist, Album: cur.Album, Found: true}, nil
+}
+
+// Untuk AdminGet
+func GetFlacByID(id int64) (*FlacEntry, error) {
+	db, err := getReadDB("flac")
+	if err != nil {
+		return nil, err
+	}
+	var e FlacEntry
+	err = db.QueryRow(`
+        SELECT id, artist, album, year, genre, quality, url_1, url_2, url_3, created_at
+        FROM flac_entries WHERE id = ?
+    `, id).Scan(
+		&e.ID, &e.Artist, &e.Album, &e.Year, &e.Genre,
+		&e.Quality, &e.URL1, &e.URL2, &e.URL3, &e.CreatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &e, nil
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
