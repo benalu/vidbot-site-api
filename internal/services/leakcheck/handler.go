@@ -146,3 +146,22 @@ func (h *Handler) AddDir(c *gin.Context) {
 		"total":   leakcheck.Default.Count(),
 	})
 }
+
+func (h *Handler) Stats(c *gin.Context) {
+	if !h.validateMasterKey(c) {
+		return
+	}
+
+	s := leakcheck.Default.Stats()
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"db_ready":    s.DBReady,
+			"entry_count": s.EntryCount,
+			"latency_ms":  s.LatencyMs,
+			"cache": gin.H{
+				"size": s.CacheSize,
+			},
+		},
+	})
+}

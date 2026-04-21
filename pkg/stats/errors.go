@@ -146,3 +146,88 @@ func GetRecentErrors(limit int) []map[string]interface{} {
 	}
 	return result
 }
+
+// GetErrorSummary — ringkasan actionable: platform bermasalah + jam spike
+func GetErrorSummary(hours int) map[string]interface{} {
+	if DB == nil {
+		return map[string]interface{}{}
+	}
+
+	// Top platform bermasalah
+	platformRows, err := DB.Query(`
+        SELECT grp, platform, COUNT(*) as count
+        FROM errors
+        WHERE created_at >= NOW() - ($1 || ' hours')::INTERVAL
+          AND platform IS NOT NULL AND platform != ''
+        GROUP BY grp, platform
+        ORDER BY count DESC
+        LIMIT 10
+    `, hours)
+
+	topPlatforms := []map[string]interface{}{}
+	if err == nil {
+		defer platformRows.Close()
+		for platformRows.Next() {
+			var grp, platform string
+			var count int
+			platformRows.Scan(&grp, &platform, &count)
+			topPlatforms = append(topPlatforms, map[string]interface{}{
+				"group": grp, "platform": platform, "errors": count,
+			})
+		}
+	}
+
+	// Error per jam (untuk deteksi spike)
+	hourRows, err := DB.Query(`
+        SELECT
+            TO_CHAR(created_at AT TIME ZONE 'UTC', 'HH24') AS hour,
+            COUNT(*) AS count
+        FROM errors
+        WHERE created_at >= NOW() - ($1 || ' hours')::INTERVAL
+        GROUP BY hour
+        ORDER BY hour ASC
+    `, hours)
+
+	byHour := []map[string]interface{}{}
+	if err == nil {
+		defer hourRows.Close()
+		for hourRows.Next() {
+			var hour string
+			var count int
+			hourRows.Scan(&hour, &count)
+			byHour = append(byHour, map[string]interface{}{
+				"hour": hour + ":00", "count": count,
+			})
+		}
+	}
+
+	// Top error code overall
+	codeRows, err := DB.Query(`
+        SELECT code, COUNT(*) as count
+        FROM errors
+        WHERE created_at >= NOW() - ($1 || ' hours')::INTERVAL
+        GROUP BY code
+        ORDER BY count DESC
+        LIMIT 5
+    `, hours)
+
+	topCodes := []map[string]interface{}{}
+	if err == nil {
+		defer codeRows.Close()
+		for codeRows.Next() {
+			var code string
+			var count int
+			codeRows.Scan(&code, &count)
+			topCodes = append(topCodes, map[string]interface{}{
+				"code": code, "count": count,
+			})
+		}
+	}
+
+	return map[string]interface{}{
+		"window_hours":  hours,
+		"top_platforms": topPlatforms,
+		"top_codes":     topCodes,
+		"by_hour":       byHour,
+	}
+}

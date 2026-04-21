@@ -32,6 +32,7 @@ func setupAdmin(r *gin.Engine, cfg *config.Config, healthHandler *health.Handler
 		adminGroup.POST("/keys/:keyHash/topup", adminHandler.TopUpQuota)
 		adminGroup.GET("/keys/:keyHash/usage", adminHandler.GetKeyUsage)
 		adminGroup.GET("/keys/:keyHash/reveal", adminHandler.RevealKey)
+		adminGroup.POST("/keys/:keyHash/reset-quota", adminHandler.ResetQuota)
 
 		// feature flags
 		adminGroup.GET("/features", adminHandler.GetFeatures)
@@ -42,6 +43,8 @@ func setupAdmin(r *gin.Engine, cfg *config.Config, healthHandler *health.Handler
 		adminGroup.GET("/stats", adminHandler.GetStats)
 		adminGroup.GET("/stats/realtime", adminHandler.GetRealtimeStats)
 		adminGroup.GET("/stats/errors", adminHandler.GetErrorStats)
+		adminGroup.GET("/stats/platform-breakdown", adminHandler.GetPlatformBreakdown)
+		adminGroup.GET("/stats/errors/summary", adminHandler.GetErrorSummary)
 
 		// system
 		adminGroup.GET("/system/health", adminHandler.GetHealth)
@@ -49,6 +52,7 @@ func setupAdmin(r *gin.Engine, cfg *config.Config, healthHandler *health.Handler
 		adminGroup.GET("/system/queue", adminHandler.GetSystemQueue)
 		adminGroup.GET("/system/sessions", adminHandler.GetActiveSessions)
 		adminGroup.DELETE("/system/sessions/:sessionId", adminHandler.RevokeSession)
+		adminGroup.GET("/system/diagnostics", adminHandler.GetDiagnostics)
 
 		// providers
 		adminGroup.GET("/providers", adminHandler.GetProviders)

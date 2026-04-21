@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"runtime"
 	"strings"
 	"time"
 	"vidbot-api/internal/health"
@@ -162,6 +163,7 @@ func (h *Handler) RevokeKey(c *gin.Context) {
 
 	jsonData, _ := json.Marshal(data)
 	cache.Set(ctx, redisKey, string(jsonData), 0)
+	cache.InvalidateAPIKey(keyHash)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -377,6 +379,9 @@ func (h *Handler) TopUpQuota(c *gin.Context) {
 	jsonData, _ := json.Marshal(data)
 	cache.Set(ctx, redisKey, string(jsonData), 0)
 
+	resolvedHash := strings.TrimPrefix(redisKey, "apikeys:")
+	cache.InvalidateAPIKey(resolvedHash)
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": fmt.Sprintf("Quota top-up successful for '%s'", data.Name),
@@ -406,6 +411,60 @@ var validPlatforms = map[string][]string{
 	"convert":    {"audio", "document", "image", "fonts"},
 	"app":        {"android", "windows"},
 	"downloader": {"flac"},
+}
+
+func (h *Handler) ResetQuota(c *gin.Context) {
+	if c.Request.ContentLength > 0 {
+		response.AdminBadRequest(c, "Request body not allowed.")
+		return
+	}
+
+	keyHash := c.Param("keyHash")
+	ctx := context.Background()
+
+	// verifikasi key ada
+	redisKey := fmt.Sprintf("apikeys:%s", keyHash)
+	raw, err := cache.Get(ctx, redisKey)
+	if err != nil {
+		// coba derive hash kalau user kirim plain key
+		hash := sha256.Sum256([]byte(keyHash))
+		derivedHash := hex.EncodeToString(hash[:])
+		redisKey = fmt.Sprintf("apikeys:%s", derivedHash)
+		raw, err = cache.Get(ctx, redisKey)
+		if err != nil {
+			response.AdminNotFound(c, "API key not found.")
+			return
+		}
+		keyHash = derivedHash
+	}
+
+	var data apikey.Data
+	json.Unmarshal([]byte(raw), &data)
+
+	quotaKey := fmt.Sprintf("apikeys:quota:%s", keyHash)
+
+	// ambil nilai sebelum reset untuk response
+	prevStr, _ := cache.Get(ctx, quotaKey)
+	prev := 0
+	fmt.Sscanf(prevStr, "%d", &prev)
+
+	// reset ke 0 — hapus key, bukan set ke "0", supaya AtomicQuotaCheck mulai fresh
+	if err := cache.Del(ctx, quotaKey); err != nil {
+		response.AdminDB(c, "reset quota", err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": fmt.Sprintf("Quota usage reset for '%s'", data.Name),
+		"data": gin.H{
+			"name":           data.Name,
+			"email":          data.Email,
+			"quota_limit":    data.Quota,
+			"quota_used_was": prev,
+			"quota_used_now": 0,
+		},
+	})
 }
 
 func isValidPlatform(group, platform string) bool {
@@ -467,6 +526,7 @@ func (h *Handler) GetFeatures(c *gin.Context) {
 	})
 }
 
+// ToggleFeature — tambah InvalidateFeatureFlag setelah Set
 func (h *Handler) ToggleFeature(c *gin.Context) {
 	group := c.Param("group")
 	if !validGroups[group] {
@@ -483,7 +543,9 @@ func (h *Handler) ToggleFeature(c *gin.Context) {
 	}
 
 	ctx := context.Background()
-	cache.Set(ctx, fmt.Sprintf("feature:%s", group), req.Status, 0)
+	featureKey := fmt.Sprintf("feature:%s", group)
+	cache.Set(ctx, featureKey, req.Status, 0)
+	cache.InvalidateFeatureFlag(featureKey) // ← tambah ini
 
 	c.JSON(http.StatusOK, adminMessageResponse{
 		Success: true,
@@ -491,6 +553,7 @@ func (h *Handler) ToggleFeature(c *gin.Context) {
 	})
 }
 
+// ToggleFeaturePlatform — tambah InvalidateFeatureFlag setelah Set
 func (h *Handler) ToggleFeaturePlatform(c *gin.Context) {
 	group := c.Param("group")
 	platform := c.Param("platform")
@@ -513,7 +576,9 @@ func (h *Handler) ToggleFeaturePlatform(c *gin.Context) {
 	}
 
 	ctx := context.Background()
-	cache.Set(ctx, fmt.Sprintf("feature:%s:%s", group, platform), req.Status, 0)
+	platformKey := fmt.Sprintf("feature:%s:%s", group, platform)
+	cache.Set(ctx, platformKey, req.Status, 0)
+	cache.InvalidateFeatureFlag(platformKey) // ← tambah ini
 
 	c.JSON(http.StatusOK, adminMessageResponse{
 		Success: true,
@@ -640,6 +705,14 @@ func (h *Handler) GetStats(c *gin.Context) {
 	})
 }
 
+func (h *Handler) GetPlatformBreakdown(c *gin.Context) {
+	data := stats.GetPlatformBreakdown()
+	c.JSON(http.StatusOK, adminResponse{
+		Success: true,
+		Data:    data,
+	})
+}
+
 func (h *Handler) GetKeyUsage(c *gin.Context) {
 	keyHash := c.Param("keyHash")
 
@@ -724,6 +797,70 @@ func (h *Handler) GetErrorStats(c *gin.Context) {
 		Data: gin.H{
 			"by_code": stats.GetErrorStats(group, platform, hours),
 			"recent":  stats.GetRecentErrors(limit),
+		},
+	})
+}
+
+func (h *Handler) GetErrorSummary(c *gin.Context) {
+	hours := 24
+	if hq := c.Query("hours"); hq != "" {
+		fmt.Sscanf(hq, "%d", &hours)
+		if hours < 1 || hours > 168 {
+			hours = 24
+		}
+	}
+
+	c.JSON(http.StatusOK, adminResponse{
+		Success: true,
+		Data:    stats.GetErrorSummary(hours),
+	})
+}
+
+func (h *Handler) GetDiagnostics(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	// Redis latency
+	redisStart := time.Now()
+	redisOK := cache.Ping(ctx) == nil
+	redisLatency := time.Since(redisStart).Milliseconds()
+
+	// Queue state
+	hlsCurrent := limiter.HLSDownload.Current()
+	hlsMax := limiter.HLSDownload.Max()
+	streamCurrent := limiter.DirectStream.Current()
+	streamMax := limiter.DirectStream.Max()
+
+	// Goroutine + uptime
+	goroutines := runtime.NumGoroutine()
+	uptime := h.healthHandler.Uptime()
+
+	// Stats DB latency
+	statsLatency := stats.SampleSearchLatency()
+
+	// Overall health signal
+	healthy := redisOK && hlsCurrent < hlsMax && streamCurrent < streamMax
+
+	c.JSON(http.StatusOK, adminResponse{
+		Success: true,
+		Data: gin.H{
+			"healthy":   healthy,
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+			"uptime":    formatUptime(uptime),
+			"redis": gin.H{
+				"ok":         redisOK,
+				"latency_ms": redisLatency,
+			},
+			"queue": gin.H{
+				"hls_download":  gin.H{"current": hlsCurrent, "max": hlsMax},
+				"direct_stream": gin.H{"current": streamCurrent, "max": streamMax},
+			},
+			"system": gin.H{
+				"goroutines": goroutines,
+			},
+			"stats_db": gin.H{
+				"latency_ms": statsLatency,
+			},
 		},
 	})
 }

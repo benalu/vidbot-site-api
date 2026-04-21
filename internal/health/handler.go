@@ -365,3 +365,7 @@ func formatUptime(d time.Duration) string {
 	}
 	return fmt.Sprintf("%dm", minutes)
 }
+
+func (h *Handler) Uptime() time.Duration {
+	return time.Since(h.startTime)
+}

@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -24,8 +23,8 @@ func RequireAPIKey() gin.HandlerFunc {
 		hash := sha256.Sum256([]byte(key))
 		keyHash := hex.EncodeToString(hash[:])
 
-		ctx := context.Background()
-		raw, err := cache.Get(ctx, fmt.Sprintf("apikeys:%s", keyHash))
+		// pakai in-memory cache, fallback ke Redis
+		raw, err := cache.GetAPIKey(keyHash)
 		if err != nil {
 			response.Abort(c, response.ErrAPIKeyNotFound)
 			return
@@ -38,7 +37,10 @@ func RequireAPIKey() gin.HandlerFunc {
 		}
 
 		quotaKey := fmt.Sprintf("apikeys:quota:%s", keyHash)
-		allowed, err := cache.AtomicQuotaCheck(ctx, quotaKey, data.Quota)
+		// quota check tetap ke Redis — harus konsisten antar instance
+		allowed, err := cache.AtomicQuotaCheck(
+			c.Request.Context(), quotaKey, data.Quota,
+		)
 		if err != nil || !allowed {
 			response.Abort(c, response.ErrQuotaExceeded)
 			return
@@ -60,8 +62,7 @@ func RequireAPIKeyFromQuery() gin.HandlerFunc {
 		hash := sha256.Sum256([]byte(key))
 		keyHash := hex.EncodeToString(hash[:])
 
-		ctx := context.Background()
-		raw, err := cache.Get(ctx, fmt.Sprintf("apikeys:%s", keyHash))
+		raw, err := cache.GetAPIKey(keyHash)
 		if err != nil {
 			response.Abort(c, response.ErrAPIKeyNotFound)
 			return
@@ -74,11 +75,14 @@ func RequireAPIKeyFromQuery() gin.HandlerFunc {
 		}
 
 		quotaKey := fmt.Sprintf("apikeys:quota:%s", keyHash)
-		allowed, err := cache.AtomicQuotaCheck(ctx, quotaKey, data.Quota)
+		allowed, err := cache.AtomicQuotaCheck(
+			c.Request.Context(), quotaKey, data.Quota,
+		)
 		if err != nil || !allowed {
 			response.Abort(c, response.ErrQuotaExceeded)
 			return
 		}
+
 		c.Set("api_key_data", data)
 		c.Next()
 	}

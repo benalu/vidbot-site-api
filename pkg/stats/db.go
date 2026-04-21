@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"time"
 
@@ -124,6 +125,70 @@ func GetPlatformStats(group, platform string) (totalRequests int, uniqueKeys int
 		group, platform,
 	).Scan(&totalRequests, &uniqueKeys)
 	return
+}
+
+// GetPlatformBreakdown — request count per platform, dibanding hari ini vs kemarin vs minggu lalu
+func GetPlatformBreakdown() map[string]interface{} {
+	if DB == nil {
+		return map[string]interface{}{}
+	}
+
+	rows, err := DB.Query(`
+        SELECT
+            grp,
+            platform,
+            COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE)                                    AS today,
+            COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE - INTERVAL '1 day'
+                               AND created_at <  CURRENT_DATE)                                    AS yesterday,
+            COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE - INTERVAL '7 days'
+                               AND created_at <  CURRENT_DATE - INTERVAL '1 day') / 6.0           AS avg_last_6d
+        FROM stats
+        WHERE platform IS NOT NULL
+          AND platform != ''
+          AND created_at >= CURRENT_DATE - INTERVAL '7 days'
+        GROUP BY grp, platform
+        ORDER BY grp, today DESC
+    `)
+	if err != nil {
+		return map[string]interface{}{}
+	}
+	defer rows.Close()
+
+	// struktur: { "content": { "tiktok": { today, yesterday, avg_last_6d, delta_pct } } }
+	result := map[string]map[string]map[string]interface{}{}
+	for rows.Next() {
+		var grp, platform string
+		var today, yesterday int
+		var avgLast6d float64
+		if err := rows.Scan(&grp, &platform, &today, &yesterday, &avgLast6d); err != nil {
+			continue
+		}
+		if _, ok := result[grp]; !ok {
+			result[grp] = map[string]map[string]interface{}{}
+		}
+
+		deltaPct := 0.0
+		if yesterday > 0 {
+			deltaPct = float64(today-yesterday) / float64(yesterday) * 100
+		}
+
+		// label spike/drop/stable
+		trend := "stable"
+		if deltaPct > 20 {
+			trend = "spike"
+		} else if deltaPct < -20 {
+			trend = "drop"
+		}
+
+		result[grp][platform] = map[string]interface{}{
+			"today":       today,
+			"yesterday":   yesterday,
+			"avg_last_6d": math.Round(avgLast6d*10) / 10,
+			"delta_pct":   math.Round(deltaPct*10) / 10,
+			"trend":       trend,
+		}
+	}
+	return map[string]interface{}{"by_group": result}
 }
 
 func GetKeyUsageByGroup(keyHash string) map[string]int {
@@ -263,4 +328,14 @@ func maskDSN(dsn string) string {
 		return dsn[:20] + "..."
 	}
 	return dsn
+}
+
+// SampleSearchLatency — ukur latency query sederhana ke stats DB
+func SampleSearchLatency() int64 {
+	if DB == nil {
+		return -1
+	}
+	start := time.Now()
+	DB.QueryRow(`SELECT 1`).Scan(new(int))
+	return time.Since(start).Milliseconds()
 }

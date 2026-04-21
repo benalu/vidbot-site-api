@@ -158,6 +158,42 @@ func (s *Store) StartBackground(ctx context.Context) {
 	}()
 }
 
+// Stats — info status untuk admin endpoint
+type Stats struct {
+	EntryCount   int     `json:"entry_count"`
+	DBReady      bool    `json:"db_ready"`
+	LatencyMs    int64   `json:"latency_ms"`
+	CacheSize    int     `json:"cache_size"`
+	CacheHitRate float64 `json:"cache_hit_rate"` // estimasi — lihat catatan
+}
+
+func (s *Store) Stats() Stats {
+	s.mu.RLock()
+	db := s.db
+	s.mu.RUnlock()
+
+	result := Stats{}
+
+	if db == nil {
+		return result
+	}
+
+	result.DBReady = true
+	result.EntryCount = s.Count()
+
+	// ukur latency dengan dummy query
+	start := time.Now()
+	db.QueryRow(`SELECT 1`).Scan(new(int))
+	result.LatencyMs = time.Since(start).Milliseconds()
+
+	// cache size
+	sCache.mu.RLock()
+	result.CacheSize = len(sCache.entries)
+	sCache.mu.RUnlock()
+
+	return result
+}
+
 func ensureSchema(db *sql.DB) error {
 	stmts := []string{
 		`CREATE EXTENSION IF NOT EXISTS pg_trgm`,

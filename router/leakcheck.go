@@ -27,5 +27,6 @@ func setupLeakcheck(r *gin.Engine, cfg *config.Config) {
 	{
 		adminGroup.GET("/reload", leakcheckHandler.Reload)
 		adminGroup.POST("/add-dir", leakcheckHandler.AddDir)
+		adminGroup.GET("/stats", leakcheckHandler.Stats)
 	}
 }
