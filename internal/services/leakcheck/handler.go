@@ -19,11 +19,10 @@ var blockedTerms = map[string]struct{}{
 
 type Handler struct {
 	leakcheckDir string
-	masterKey    string
 }
 
-func NewHandler(leakcheckDir, masterKey string) *Handler {
-	return &Handler{leakcheckDir: leakcheckDir, masterKey: masterKey}
+func NewHandler(leakcheckDir string) *Handler {
+	return &Handler{leakcheckDir: leakcheckDir}
 }
 
 type SearchRequest struct {
@@ -84,18 +83,7 @@ func (h *Handler) Search(c *gin.Context) {
 	})
 }
 
-func (h *Handler) validateMasterKey(c *gin.Context) bool {
-	if c.GetHeader("X-Master-Key") != h.masterKey {
-		response.Write(c, response.ErrAdminUnauthorized)
-		return false
-	}
-	return true
-}
-
 func (h *Handler) Reload(c *gin.Context) {
-	if !h.validateMasterKey(c) {
-		return
-	}
 
 	count, err := leakcheck.Default.Reload(h.leakcheckDir)
 	if err != nil {
@@ -115,9 +103,6 @@ func (h *Handler) Reload(c *gin.Context) {
 // Dir yang diterima adalah nama folder relatif terhadap leakcheckDir,
 // contoh: POST body { "dir": "batch-2" } akan membaca dari data/leakcheck/batch-2/
 func (h *Handler) AddDir(c *gin.Context) {
-	if !h.validateMasterKey(c) {
-		return
-	}
 
 	var req struct {
 		Dir string `json:"dir" binding:"required"`
@@ -163,9 +148,6 @@ func (h *Handler) Count(c *gin.Context) {
 }
 
 func (h *Handler) Stats(c *gin.Context) {
-	if !h.validateMasterKey(c) {
-		return
-	}
 
 	s := leakcheck.Default.Stats()
 	c.JSON(http.StatusOK, gin.H{

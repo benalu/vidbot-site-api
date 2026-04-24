@@ -196,14 +196,11 @@ func checkRedis() string {
 
 func checkLeakcheck() gin.H {
 	if err := leakcheck.Default.Ping(); err != nil {
-		return gin.H{
-			"status":  "down",
-			"entries": 0,
-		}
+		return gin.H{"status": "down", "entries": 0}
 	}
 	return gin.H{
 		"status":  "ok",
-		"entries": leakcheck.Default.Count(),
+		"entries": leakcheck.Default.CachedCount(),
 	}
 }
 func checkAppStore() gin.H {

@@ -10,7 +10,7 @@ import (
 )
 
 func setupLeakcheck(r *gin.Engine, cfg *config.Config) {
-	leakcheckHandler := leakcheck.NewHandler(filepath.Join(cfg.DataDir, "leakcheck"), cfg.MasterKey)
+	leakcheckHandler := leakcheck.NewHandler(filepath.Join(cfg.DataDir, "leakcheck"))
 
 	searchGroup := r.Group("/leakcheck",
 		middleware.RequireAPIKey(),
@@ -23,10 +23,10 @@ func setupLeakcheck(r *gin.Engine, cfg *config.Config) {
 		searchGroup.GET("/count", leakcheckHandler.Count)
 	}
 
-	// endpoint admin — hanya butuh master key (dicek di handler)
-	adminGroup := r.Group("/leakcheck")
+	// endpoint admin — pakai middleware RequireAdminAuth
+	adminGroup := r.Group("/admin/leakcheck", middleware.RequireAdminAuth(cfg.MasterKey))
 	{
-		adminGroup.GET("/reload", leakcheckHandler.Reload)
+		adminGroup.POST("/reload", leakcheckHandler.Reload)
 		adminGroup.POST("/add-dir", leakcheckHandler.AddDir)
 		adminGroup.GET("/stats", leakcheckHandler.Stats)
 	}
