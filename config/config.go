@@ -34,6 +34,7 @@ type Config struct {
 	StatsDSN             string
 	LeakcheckDSN         string
 	KeyVaultSecret       string
+	TmdbAPIKey           string
 	// CDN stor.co.id
 	CDNAPIKey   string
 	CDNFolderID string // folder ID Android/Windows
@@ -82,6 +83,7 @@ func Load() *Config {
 		StatsDSN:             os.Getenv("STATS_DB_DSN"),
 		LeakcheckDSN:         os.Getenv("LEAKCHECK_DB_DSN"),
 		KeyVaultSecret:       os.Getenv("KEY_VAULT_SECRET"),
+		TmdbAPIKey:           os.Getenv("TMDB_API_KEY"),
 	}
 }
 
