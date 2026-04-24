@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 	"vidbot-api/pkg/leakcheck"
 	"vidbot-api/pkg/response"
 	"vidbot-api/pkg/stats"
@@ -133,6 +134,7 @@ func (h *Handler) AddDir(c *gin.Context) {
 	}
 
 	targetDir := h.leakcheckDir + "/" + req.Dir
+	start := time.Now()
 	count, err := leakcheck.Default.AddDir(targetDir)
 	if err != nil {
 		response.AdminServiceError(c, "add leakcheck dir", err)
@@ -140,10 +142,23 @@ func (h *Handler) AddDir(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "Data added successfully.",
-		"added":   count,
-		"total":   leakcheck.Default.Count(),
+		"success":    true,
+		"message":    "Data added successfully.",
+		"added":      count,
+		"total":      leakcheck.Default.CachedCount(),
+		"elapsed_ms": time.Since(start).Milliseconds(),
+	})
+}
+
+func (h *Handler) Count(c *gin.Context) {
+	stats.Group(c, "leakcheck")
+
+	count := leakcheck.Default.Count()
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":  true,
+		"services": "leakcheck",
+		"total":    count,
 	})
 }
 

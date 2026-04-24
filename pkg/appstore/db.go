@@ -99,10 +99,10 @@ func Init(dir string) error {
 		wDB := writeDB
 		pName := platform
 		go func() {
-			ticker := time.NewTicker(15 * time.Minute)
-			defer ticker.Stop()
+			ticker := time.NewTicker(1 * time.Hour)
 			for range ticker.C {
-				if _, err := wDB.Exec(`PRAGMA wal_checkpoint(PASSIVE)`); err != nil {
+				// TRUNCATE lebih agresif tapi aman — shrink WAL file ke nol
+				if _, err := wDB.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
 					slog.Warn("wal checkpoint failed", "platform", pName, "error", err)
 				}
 			}

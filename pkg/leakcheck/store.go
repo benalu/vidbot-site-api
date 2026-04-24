@@ -25,9 +25,12 @@ type Entry struct {
 }
 
 type Store struct {
-	db  *sql.DB
-	mu  sync.RWMutex
-	dir string
+	db            *sql.DB
+	mu            sync.RWMutex
+	dir           string
+	writeMu       sync.Mutex // serialisasi operasi write: AddDir dan Reload
+	cachedCount   int
+	cachedCountAt time.Time
 }
 
 var Default = &Store{}
@@ -94,11 +97,13 @@ func (s *Store) Init(dir string) error {
 		return fmt.Errorf("leakcheck: open db: %w", err)
 	}
 
-	// PostgreSQL connection pool — read-heavy workload
-	db.SetMaxOpenConns(20)
-	db.SetMaxIdleConns(10)
+	// PostgreSQL connection pool — disesuaikan untuk VPS 4GB
+	// MaxOpenConns 10 cukup untuk read-heavy workload leakcheck
+	// sisakan koneksi untuk stats DB dan proses lain di VPS
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(30 * time.Minute)
-	db.SetConnMaxIdleTime(5 * time.Minute)
+	db.SetConnMaxIdleTime(3 * time.Minute)
 
 	if err := db.Ping(); err != nil {
 		return fmt.Errorf("leakcheck: ping failed: %w", err)
@@ -156,6 +161,28 @@ func (s *Store) StartBackground(ctx context.Context) {
 			}
 		}
 	}()
+
+	// Cleanup expired search cache setiap 10 menit
+	// Tanpa ini, entry expired tetap di memory kalau traffic berhenti
+	go func() {
+		ticker := time.NewTicker(10 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				now := time.Now()
+				sCache.mu.Lock()
+				for k, v := range sCache.entries {
+					if now.After(v.expiresAt) {
+						delete(sCache.entries, k)
+					}
+				}
+				sCache.mu.Unlock()
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 }
 
 // Stats — info status untuk admin endpoint
@@ -164,7 +191,7 @@ type Stats struct {
 	DBReady      bool    `json:"db_ready"`
 	LatencyMs    int64   `json:"latency_ms"`
 	CacheSize    int     `json:"cache_size"`
-	CacheHitRate float64 `json:"cache_hit_rate"` // estimasi — lihat catatan
+	CacheHitRate float64 `json:"cache_hit_rate"`
 }
 
 func (s *Store) Stats() Stats {
@@ -179,7 +206,7 @@ func (s *Store) Stats() Stats {
 	}
 
 	result.DBReady = true
-	result.EntryCount = s.Count()
+	result.EntryCount = s.CachedCount()
 
 	// ukur latency dengan dummy query
 	start := time.Now()
@@ -207,25 +234,18 @@ func ensureSchema(db *sql.DB) error {
             password TEXT NOT NULL DEFAULT ''
         )`,
 
-		// Ganti UNIQUE constraint jadi index biasa — UNIQUE di 10M rows
-		// bikin index ukurannya dobel dan insert jadi lambat.
-		// Dedup sudah kita handle di Go sebelum insert.
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_leakcheck_unique
          ON leakcheck(login, password)`,
 
-		// Index untuk LIKE search — ini yang dipakai query utama
 		`CREATE INDEX IF NOT EXISTS idx_leakcheck_login_trgm
          ON leakcheck USING gin (LOWER(login) gin_trgm_ops)`,
 
-		// Index exact match untuk email search yang presisi
 		`CREATE INDEX IF NOT EXISTS idx_leakcheck_login
          ON leakcheck(LOWER(login))`,
 
-		// Konfigurasi trgm threshold — tuning untuk performa
 		`ALTER SYSTEM SET pg_trgm.similarity_threshold = 0.1`,
 		`SELECT pg_reload_conf()`,
 
-		// Autovacuum tuning untuk tabel yang besar dan heavy insert
 		`ALTER TABLE leakcheck SET (
             autovacuum_vacuum_scale_factor = 0.01,
             autovacuum_analyze_scale_factor = 0.005,
@@ -242,8 +262,7 @@ func ensureSchema(db *sql.DB) error {
 	return nil
 }
 
-// Search — cari berdasarkan email atau username
-// PostgreSQL pg_trgm jauh lebih efisien dari SQLite FTS untuk 5M+ rows
+// Search — cari berdasarkan email atau username, keduanya exact match
 func (s *Store) Search(q string) []Entry {
 	q = strings.TrimSpace(q)
 	if q == "" {
@@ -268,38 +287,19 @@ func (s *Store) Search(q string) []Entry {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	conn, err := db.Conn(ctx)
-	if err != nil {
-		slog.Error("leakcheck search: get conn failed", "error", err)
-		return []Entry{}
-	}
-	defer conn.Close()
-
-	// Set work_mem per connection untuk query besar
-	conn.ExecContext(ctx, `SET LOCAL work_mem = '64MB'`)
-
+	// Pakai db.QueryContext() langsung — tidak butuh pin ke satu koneksi
+	// karena tidak ada SET LOCAL yang perlu dijalankan dulu.
+	// Pool otomatis handle ambil dan kembalikan koneksi dengan aman.
 	var rows *sql.Rows
-	isEmail := strings.Contains(lowerQ, "@")
+	var err error
 
-	if isEmail {
-		// Email: exact match pakai btree idx_leakcheck_login — <5ms
-		rows, err = conn.QueryContext(ctx,
-			`SELECT source, soft, host, login, password
-			 FROM leakcheck
-			 WHERE LOWER(login) = $1
-			 LIMIT 500`,
-			lowerQ,
-		)
-	} else {
-		// Username: partial match pakai trgm — 5ms
-		rows, err = conn.QueryContext(ctx,
-			`SELECT source, soft, host, login, password
-			 FROM leakcheck
-			 WHERE LOWER(login) = $1
-			 LIMIT 500`,
-			lowerQ,
-		)
-	}
+	rows, err = db.QueryContext(ctx,
+		`SELECT source, soft, host, login, password
+		 FROM leakcheck
+		 WHERE LOWER(login) = $1
+		 LIMIT 500`,
+		lowerQ,
+	)
 
 	if err != nil {
 		slog.Error("leakcheck search failed", "error", err, "query", q)
@@ -322,6 +322,10 @@ func (s *Store) Search(q string) []Entry {
 
 // AddDir — tambah data dari folder baru tanpa rebuild
 func (s *Store) AddDir(newDir string) (int, error) {
+	// Pastikan hanya satu operasi write (AddDir/Reload) berjalan sekaligus
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	s.mu.RLock()
 	db := s.db
 	s.mu.RUnlock()
@@ -329,6 +333,35 @@ func (s *Store) AddDir(newDir string) (int, error) {
 	if db == nil {
 		return 0, fmt.Errorf("database not initialized")
 	}
+
+	// Pre-check: hitung dulu berapa file sebelum mulai insert
+	fileCount := 0
+	var totalSize int64
+	filepath.WalkDir(newDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		if strings.HasSuffix(strings.ToLower(path), ".txt") {
+			fileCount++
+			if info, infoErr := d.Info(); infoErr == nil {
+				totalSize += info.Size()
+			}
+		}
+		return nil
+	})
+	if fileCount == 0 {
+		return 0, fmt.Errorf("no .txt files found in dir: %s", newDir)
+	}
+	const maxFilesPerAddDir = 500
+	if fileCount > maxFilesPerAddDir {
+		return 0, fmt.Errorf("too many files: %d (max %d), gunakan Reload() untuk dataset besar",
+			fileCount, maxFilesPerAddDir)
+	}
+	slog.Info("leakcheck add-dir pre-check",
+		"dir", newDir,
+		"files", fileCount,
+		"total_size_mb", totalSize/1024/1024,
+	)
 
 	inserted, err := insertEntriesFromDir(newDir, db)
 	if err != nil {
@@ -349,6 +382,10 @@ func (s *Store) AddDir(newDir string) (int, error) {
 
 // Reload — rebuild semua data (clear + reload)
 func (s *Store) Reload(dir string) (int, error) {
+	// writeMu memastikan Reload tidak berjalan bersamaan dengan AddDir
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	s.mu.RLock()
 	db := s.db
 	s.mu.RUnlock()
@@ -401,16 +438,28 @@ func (s *Store) Reload(dir string) (int, error) {
 	slog.Info("leakcheck analyze staging table...")
 	db.Exec(`ANALYZE leakcheck_new`)
 
-	// Step 5: atomic swap — ini yang paling kritis, harus cepat
-	// Pakai transaction untuk atomic rename
+	// Step 5: atomic swap — bungkus dalam transaksi supaya kedua ALTER TABLE
+	// commit atau rollback bersama. Kalau salah satu gagal, tabel lama tetap ada.
 	slog.Info("leakcheck swapping tables...")
-	_, err = db.Exec(`
-        ALTER TABLE leakcheck RENAME TO leakcheck_old;
-        ALTER TABLE leakcheck_new RENAME TO leakcheck;
-    `)
-	if err != nil {
+	swapTx, swapErr := db.Begin()
+	if swapErr != nil {
 		db.Exec(`DROP TABLE IF EXISTS leakcheck_new`)
-		return 0, fmt.Errorf("table swap failed: %w", err)
+		return 0, fmt.Errorf("table swap begin tx failed: %w", swapErr)
+	}
+	_, swapErr = swapTx.Exec(`ALTER TABLE leakcheck RENAME TO leakcheck_old`)
+	if swapErr != nil {
+		swapTx.Rollback()
+		db.Exec(`DROP TABLE IF EXISTS leakcheck_new`)
+		return 0, fmt.Errorf("table swap rename old failed: %w", swapErr)
+	}
+	_, swapErr = swapTx.Exec(`ALTER TABLE leakcheck_new RENAME TO leakcheck`)
+	if swapErr != nil {
+		swapTx.Rollback()
+		return 0, fmt.Errorf("table swap rename new failed: %w", swapErr)
+	}
+	if swapErr = swapTx.Commit(); swapErr != nil {
+		swapTx.Rollback()
+		return 0, fmt.Errorf("table swap commit failed: %w", swapErr)
 	}
 
 	// Step 6: hapus tabel lama (background, tidak blocking)
@@ -450,7 +499,6 @@ func (s *Store) loadFromDir(dir string) error {
 }
 
 // insertEntriesFromDir — scan semua .txt di dir, parse, insert ke PostgreSQL
-// Pakai COPY command via UNNEST untuk performa bulk insert maksimal
 func insertEntriesFromDir(dir string, db *sql.DB) (int, error) {
 	return insertEntriesFromDirToTable(dir, db, "leakcheck")
 }
@@ -476,13 +524,11 @@ func insertEntriesFromDirToTable(dir string, db *sql.DB, tableName string) (int,
 		}
 		count := len(bLogins)
 
-		// Gunakan fmt.Sprintf untuk inject table name
-		// Table name tidak bisa di-parameterize di PostgreSQL
 		query := fmt.Sprintf(`
-            INSERT INTO %s (source, soft, host, login, password)
-            SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[], $4::text[], $5::text[])
-            ON CONFLICT (login, password) DO NOTHING
-        `, tableName)
+			INSERT INTO %s (source, soft, host, login, password)
+			SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[], $4::text[], $5::text[])
+			ON CONFLICT (login, password) DO NOTHING
+		`, tableName)
 
 		_, err := db.Exec(query, bSources, bSofts, bHosts, bLogins, bPasswords)
 		if err != nil {
@@ -490,27 +536,33 @@ func insertEntriesFromDirToTable(dir string, db *sql.DB, tableName string) (int,
 				"batch_size", count, "error", err)
 
 			fallbackQuery := fmt.Sprintf(`
-                INSERT INTO %s (source, soft, host, login, password)
-                VALUES ($1, $2, $3, $4, $5)
-                ON CONFLICT (login, password) DO NOTHING
-            `, tableName)
+				INSERT INTO %s (source, soft, host, login, password)
+				VALUES ($1, $2, $3, $4, $5)
+				ON CONFLICT (login, password) DO NOTHING
+			`, tableName)
 
 			stmt, prepErr := db.Prepare(fallbackQuery)
-			if prepErr == nil {
-				defer stmt.Close()
-				fallbackCount := 0
-				for i := range bLogins {
-					if _, rowErr := stmt.Exec(
-						bSources[i], bSofts[i], bHosts[i], bLogins[i], bPasswords[i],
-					); rowErr != nil {
-						slog.Debug("skip row with invalid data",
-							"login_prefix", safePrefix(bLogins[i]), "error", rowErr)
-						continue
-					}
-					fallbackCount++
-				}
-				inserted += fallbackCount
+			if prepErr != nil {
+				bSources = bSources[:0]
+				bSofts = bSofts[:0]
+				bHosts = bHosts[:0]
+				bLogins = bLogins[:0]
+				bPasswords = bPasswords[:0]
+				return fmt.Errorf("fallback prepare failed: %w", prepErr)
 			}
+			defer stmt.Close()
+			fallbackCount := 0
+			for i := range bLogins {
+				if _, rowErr := stmt.Exec(
+					bSources[i], bSofts[i], bHosts[i], bLogins[i], bPasswords[i],
+				); rowErr != nil {
+					slog.Debug("skip row with invalid data",
+						"login_prefix", safePrefix(bLogins[i]), "error", rowErr)
+					continue
+				}
+				fallbackCount++
+			}
+			inserted += fallbackCount
 		} else {
 			inserted += count
 		}
@@ -522,9 +574,6 @@ func insertEntriesFromDirToTable(dir string, db *sql.DB, tableName string) (int,
 		bPasswords = bPasswords[:0]
 		return nil
 	}
-
-	// ... sisa kode WalkDir sama persis seperti sebelumnya ...
-	// tidak ada perubahan di bagian walk dan parse
 
 	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -560,9 +609,20 @@ func insertEntriesFromDirToTable(dir string, db *sql.DB, tableName string) (int,
 			bPasswords = append(bPasswords, password)
 
 			if len(bLogins) >= batchSize {
-				flush()
+				if fErr := flush(); fErr != nil {
+					return fmt.Errorf("flush batch failed: %w", fErr)
+				}
 			}
 		}
+
+		// Progress log per file
+		slog.Info("leakcheck file processed",
+			"file", filepath.Base(path),
+			"file_no", fileCount,
+			"entries_in_file", len(entries),
+			"inserted_so_far", inserted,
+		)
+
 		return nil
 	})
 
@@ -570,7 +630,10 @@ func insertEntriesFromDirToTable(dir string, db *sql.DB, tableName string) (int,
 		return inserted, err
 	}
 
-	flush()
+	// Flush sisa data yang belum dikirim
+	if fErr := flush(); fErr != nil {
+		return inserted, fmt.Errorf("final flush failed: %w", fErr)
+	}
 
 	slog.Info("leakcheck scan done",
 		"files", fileCount,
@@ -580,19 +643,18 @@ func insertEntriesFromDirToTable(dir string, db *sql.DB, tableName string) (int,
 	)
 	return inserted, nil
 }
+
 func sanitizeString(s string) string {
 	// Hapus null byte
 	s = strings.ReplaceAll(s, "\x00", "")
 
 	// Encode ke []byte lalu rebuild hanya rune yang valid
-	// Ini lebih reliable dari strings.ToValidUTF8 untuk partial sequences
 	if !utf8.ValidString(s) {
 		var b strings.Builder
 		b.Grow(len(s))
 		for i := 0; i < len(s); {
 			r, size := utf8.DecodeRuneInString(s[i:])
 			if r == utf8.RuneError && size == 1 {
-				// byte tunggal invalid — skip
 				i++
 				continue
 			}
@@ -622,6 +684,9 @@ func (s *Store) Ping() error {
 	return db.PingContext(context.Background())
 }
 
+// Count mengembalikan estimasi jumlah entry dari pg_class (cepat).
+// Akurat setelah ANALYZE dijalankan — dipanggil otomatis setelah
+// loadFromDir() dan AddDir() selesai.
 func (s *Store) Count() int {
 	s.mu.RLock()
 	db := s.db
@@ -630,20 +695,36 @@ func (s *Store) Count() int {
 		return 0
 	}
 	var count int
-	// reltuples lebih cepat, cukup untuk display
-	err := db.QueryRow(`
+	db.QueryRow(`
         SELECT GREATEST(reltuples::BIGINT, 0)
         FROM pg_class
         WHERE relname = 'leakcheck'
     `).Scan(&count)
-	if err != nil || count == 0 {
-		// fallback exact count — hanya dipakai saat pertama kali sebelum ANALYZE
-		db.QueryRow(`SELECT COUNT(1) FROM leakcheck`).Scan(&count)
-	}
 	return count
 }
 
-// ─── Parser (sama dengan SQLite version) ──────────────────────────────────────
+// CachedCount mengembalikan Count() dengan cache 1 menit.
+// Gunakan ini di response handler supaya tidak ada query DB setiap request.
+func (s *Store) CachedCount() int {
+	s.mu.RLock()
+	if time.Since(s.cachedCountAt) < 1*time.Minute && s.cachedCount > 0 {
+		val := s.cachedCount
+		s.mu.RUnlock()
+		return val
+	}
+	s.mu.RUnlock()
+
+	count := s.Count()
+
+	s.mu.Lock()
+	s.cachedCount = count
+	s.cachedCountAt = time.Now()
+	s.mu.Unlock()
+
+	return count
+}
+
+// ─── Parser ───────────────────────────────────────────────────────────────────
 
 func parseFile(path string) ([]Entry, error) {
 	f, err := os.Open(path)

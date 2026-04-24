@@ -20,6 +20,7 @@ func setupLeakcheck(r *gin.Engine, cfg *config.Config) {
 	)
 	{
 		searchGroup.POST("/search", leakcheckHandler.Search)
+		searchGroup.GET("/count", leakcheckHandler.Count)
 	}
 
 	// endpoint admin — hanya butuh master key (dicek di handler)
