@@ -139,9 +139,9 @@ func platformTableName(platform string) string {
 	case "flac":
 		return "flac_entries"
 	case "movies":
-		return "movies_entries"
+		return "movie_entries"
 	case "ebooks":
-		return "ebooks_entries"
+		return "ebook_entries"
 	default:
 		return platform + "_entries"
 	}

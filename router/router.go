@@ -91,8 +91,6 @@ func Setup(r *gin.Engine, cfg *config.Config) {
 	setupLeakcheck(r, cfg)
 	setupApp(r, cfg)
 	setupDownloader(r, cfg)
-	setupMovies(r, cfg)
-	setupEbooks(r, cfg)
 }
 
 type contentProviderSet struct {
