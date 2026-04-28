@@ -410,7 +410,7 @@ var validPlatforms = map[string][]string{
 	"vidhub":     {"videb", "vidoy", "vidbos", "vidarato", "vidnest", "kingbokeptv"},
 	"convert":    {"audio", "document", "image", "fonts"},
 	"app":        {"android", "windows"},
-	"downloader": {"flac"},
+	"downloader": {"flac", "movies", "ebooks"},
 }
 
 func (h *Handler) ResetQuota(c *gin.Context) {

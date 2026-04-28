@@ -15,6 +15,7 @@ import (
 var validPlatforms = map[string]bool{
 	"flac":   true,
 	"movies": true,
+	"ebooks": true,
 	// tambah platform lain di sini nanti: "ebooks", "anime", "movies", "games", "courses"
 }
 
@@ -130,6 +131,7 @@ func initPlatform(dir, platform string) error {
 var migrators = map[string]func(*sql.DB) error{
 	"flac":   migrateFlac,
 	"movies": migrateMovies,
+	"ebooks": migrateEbooks,
 }
 
 func platformTableName(platform string) string {
@@ -138,6 +140,8 @@ func platformTableName(platform string) string {
 		return "flac_entries"
 	case "movies":
 		return "movies_entries"
+	case "ebooks":
+		return "ebooks_entries"
 	default:
 		return platform + "_entries"
 	}
